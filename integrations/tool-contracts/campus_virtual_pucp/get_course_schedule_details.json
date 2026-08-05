@@ -1,0 +1,27 @@
+{
+  "name": "get_course_schedule_details",
+  "description": "Return one active-term course schedule with linked sessions, professor, rooms, modality, survey, and capacity evidence.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "course": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9-]{3,15}$"
+      },
+      "schedule": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 15
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [
+      "course",
+      "schedule"
+    ],
+    "additionalProperties": false
+  }
+}

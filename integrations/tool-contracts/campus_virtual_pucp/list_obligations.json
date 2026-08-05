@@ -1,0 +1,31 @@
+{
+  "name": "list_obligations",
+  "description": "Read-only list of cached obligations with available amounts, due dates, and status; never submits a payment.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string"
+      },
+      "term": {
+        "type": "string",
+        "minLength": 1
+      },
+      "status": {
+        "type": "string",
+        "minLength": 1
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

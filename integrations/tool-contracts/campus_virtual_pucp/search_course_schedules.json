@@ -1,0 +1,63 @@
+{
+  "name": "search_course_schedules",
+  "description": "Search the active enrollment term using the live registration view first (regular or compatible extemporaneous) and the shared PUCP schedule catalog to fill missing data; never accepts a term or uses historical data.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "courseCodes": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 30,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]{3,15}$"
+        }
+      },
+      "courseName": {
+        "type": "string",
+        "maxLength": 120
+      },
+      "academicScope": {
+        "type": "object",
+        "properties": {
+          "academicUnit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "specialty": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "curriculumLevel": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30,
+            "description": "Official curriculum level shown by Campus; Nivel 0 contains Cursos Electivos. Requires specialty and is never inferred from course codes."
+          }
+        },
+        "required": [
+          "academicUnit"
+        ],
+        "additionalProperties": false
+      },
+      "page": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000
+      },
+      "pageSize": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

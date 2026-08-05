@@ -1,0 +1,37 @@
+{
+  "name": "list_pending_items",
+  "description": "List cached assignments and quizzes with deterministic filters and ordering.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "course": {
+        "type": "string",
+        "minLength": 1
+      },
+      "section": {
+        "type": "string",
+        "minLength": 1
+      },
+      "type": {
+        "enum": [
+          "assignment",
+          "quiz"
+        ]
+      },
+      "query": {
+        "type": "string"
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Start a metadata refresh when true while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

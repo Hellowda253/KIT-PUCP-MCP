@@ -1,0 +1,29 @@
+{
+  "name": "sync_campus_virtual",
+  "description": "Queue a headless metadata-only Campus refresh; never downloads, pays, enrolls, submits forms, creates requests, or changes profile data.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "start": {
+        "type": "string",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "end": {
+        "type": "string",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "days": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 365
+      },
+      "moduleConcurrency": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

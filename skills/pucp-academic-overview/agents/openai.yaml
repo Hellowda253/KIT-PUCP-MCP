@@ -1,0 +1,4 @@
+interface:
+  display_name: "Resumen Académico PUCP"
+  short_description: "Combina Paideia y Campus Virtual PUCP"
+  default_prompt: "Use $pucp-academic-overview para resumir mi semana académica PUCP."

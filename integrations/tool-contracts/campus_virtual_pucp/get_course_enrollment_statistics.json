@@ -1,0 +1,25 @@
+{
+  "name": "get_course_enrollment_statistics",
+  "description": "Return active-term capacity, registrations, enrollment, personal position when published, and an explained non-guaranteed risk level.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "course": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9-]{3,15}$"
+      },
+      "schedule": {
+        "type": "string",
+        "maxLength": 15
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [
+      "course"
+    ],
+    "additionalProperties": false
+  }
+}

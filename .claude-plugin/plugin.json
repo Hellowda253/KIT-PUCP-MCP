@@ -1,0 +1,8 @@
+{
+  "name": "pucp-mcp",
+  "version": "0.1.0",
+  "description": "Consultas académicas de Paideia y Campus Virtual PUCP, con cambios de inscripción limitados por confirmación y skills para estudiantes.",
+  "author": {
+    "name": "PUCP-MCP Community"
+  }
+}

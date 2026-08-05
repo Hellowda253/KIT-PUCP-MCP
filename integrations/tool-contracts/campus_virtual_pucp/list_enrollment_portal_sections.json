@@ -1,0 +1,15 @@
+{
+  "name": "list_enrollment_portal_sections",
+  "description": "List all cached enrollment portal tabs, read-only actions, and permanently blocked mutation actions.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

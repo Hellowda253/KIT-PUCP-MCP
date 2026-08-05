@@ -1,0 +1,17 @@
+{
+  "name": "get_paideia_job_status",
+  "description": "Return status and safe results for a Paideia sync or download job.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "jobId": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required": [
+      "jobId"
+    ],
+    "additionalProperties": false
+  }
+}

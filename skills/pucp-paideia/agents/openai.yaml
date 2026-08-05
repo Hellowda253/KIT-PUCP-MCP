@@ -1,0 +1,4 @@
+interface:
+  display_name: "PUCP Paideia"
+  short_description: "Consulta segura de cursos y materiales Paideia"
+  default_prompt: "Use $pucp-paideia para consultar mis cursos y pendientes de Paideia."

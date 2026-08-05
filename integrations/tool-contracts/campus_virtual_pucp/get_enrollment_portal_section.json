@@ -1,0 +1,31 @@
+{
+  "name": "get_enrollment_portal_section",
+  "description": "Return cached read-only content for one secondary enrollment portal section; never submits its actions.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "section": {
+        "type": "string",
+        "enum": [
+          "student_data",
+          "courses_schedules",
+          "exceptions",
+          "insurance_services",
+          "contacts"
+        ]
+      },
+      "includeSensitive": {
+        "type": "boolean",
+        "description": "Include personal values only when explicitly requested."
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [
+      "section"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "get_schedule_preferences",
+  "description": "Return effective default and optional private local schedule preferences without exposing credentials.",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  }
+}

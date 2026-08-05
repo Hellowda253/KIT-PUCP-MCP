@@ -1,0 +1,405 @@
+version: "1.0"
+last_reviewed: "2026-07-29"
+scope:
+  audiences: ["undergraduate", "postgraduate", "continuing_education"]
+  excluded: ["faculty-only guidance", "Idiomas PUCP platform"]
+policies:
+  live_check_required_for: ["dynamic", "per_cycle"]
+  personal_data_channel: "mcp"
+  public_information_channel: "official_web"
+  third_party_rule: "Use only when linked from an official PUCP entrypoint."
+  never_store: ["session URLs", "SSO parameters", "payment links", "personal records"]
+
+sources:
+  - id: "paideia-portal"
+    title: "Paideia - Plataforma Educativa PUCP"
+    url: "https://paideia.pucp.edu.pe/"
+    domain: "paideia.pucp.edu.pe"
+    categories: ["courses", "activities", "materials", "continuing_education"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "authenticated"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "mcp"
+    consult_when: "Se necesiten cursos, actividades, avisos, calificaciones visibles o materiales del estudiante."
+    verification_status: "live"
+
+  - id: "campus-virtual-portal"
+    title: "Campus Virtual PUCP"
+    url: "https://campusvirtual.pucp.edu.pe/"
+    domain: "campusvirtual.pucp.edu.pe"
+    categories: ["grades", "academic_history", "enrollment", "payments", "requests", "personal_documents"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "authenticated"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "mcp"
+    consult_when: "La respuesta depende de información académica o administrativa personal."
+    verification_status: "officially_linked"
+
+  - id: "agora-campus-help"
+    title: "Campus Virtual - Ayuda en Línea (Ágora)"
+    url: "https://agora.pucp.edu.pe/tutorial/campusvirtual/inicio.php"
+    domain: "agora.pucp.edu.pe"
+    categories: ["campus_help", "procedures", "technical_guides"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "official_guidance"
+    stability: "stable"
+    preferred_channel: "web"
+    consult_when: "Se necesite explicar cómo utilizar Campus Virtual o completar un procedimiento."
+    verification_status: "live"
+
+  - id: "student-portal"
+    title: "Portal del Estudiante PUCP"
+    url: "https://estudiante.pucp.edu.pe/"
+    domain: "estudiante.pucp.edu.pe"
+    categories: ["student_information", "calendar", "courses", "payments", "procedures", "services"]
+    target_audience: ["undergraduate", "postgraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se busque el punto de entrada público para información dirigida a estudiantes."
+    verification_status: "live"
+
+  - id: "student-guide-hub"
+    title: "Guía del Estudiante"
+    url: "https://estudiante.pucp.edu.pe/guia-del-estudiante/"
+    domain: "estudiante.pucp.edu.pe"
+    categories: ["current_cycle", "regulations", "enrollment", "study_plans"]
+    target_audience: ["undergraduate", "postgraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "per_cycle"
+    preferred_channel: "web"
+    consult_when: "Se requieran manuales, reglas y documentos consolidados del ciclo vigente."
+    verification_status: "live"
+
+  - id: "student-regulations"
+    title: "Reglamentos - Portal del Estudiante"
+    url: "https://estudiante.pucp.edu.pe/reglamentos/"
+    domain: "estudiante.pucp.edu.pe"
+    categories: ["regulations", "academic_rules", "economic_rules", "student_rights"]
+    target_audience: ["undergraduate", "postgraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "stable"
+    preferred_channel: "web"
+    consult_when: "Se necesite localizar una norma aplicable a estudiantes."
+    verification_status: "live"
+
+  - id: "enrollment-regulation"
+    title: "Reglamento de Matrícula de los Alumnos Ordinarios"
+    url: "https://estudiante.pucp.edu.pe/wp-content/uploads/2016/03/1985031ReglamentoDeMatriculaDeLosAlumnosOrdinarios.pdf"
+    domain: "estudiante.pucp.edu.pe"
+    categories: ["enrollment", "ordinary_student_status", "regulations"]
+    target_audience: ["undergraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "stable"
+    preferred_channel: "web"
+    consult_when: "Se consulte la condición de alumno ordinario o las reglas generales de matrícula."
+    verification_status: "live"
+
+  - id: "institutional-documents"
+    title: "Documentos institucionales PUCP"
+    url: "https://www.pucp.edu.pe/la-universidad/documentos/"
+    domain: "www.pucp.edu.pe"
+    categories: ["regulations", "policies", "official_resolutions", "institutional_guides"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se necesite buscar la versión institucional de una política, reglamento o resolución."
+    verification_status: "live"
+
+  - id: "academic-calendar-hub"
+    title: "Calendario Académico - Portal del Estudiante"
+    url: "https://estudiante.pucp.edu.pe/calendario-academico/"
+    domain: "estudiante.pucp.edu.pe"
+    categories: ["academic_calendar", "enrollment_dates", "classes", "payments"]
+    target_audience: ["undergraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "per_cycle"
+    preferred_channel: "web"
+    consult_when: "Se pidan fechas generales de matrícula, clases, pagos o resultados del ciclo."
+    verification_status: "live"
+
+  - id: "study-plans-and-courses"
+    title: "Planes de estudio y cursos - Portal del Estudiante"
+    url: "https://estudiante.pucp.edu.pe/planes-de-estudio-y-cursos/"
+    domain: "estudiante.pucp.edu.pe"
+    categories: ["study_plans", "course_catalog", "course_summaries", "public_schedules"]
+    target_audience: ["undergraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "per_cycle"
+    preferred_channel: "web"
+    consult_when: "Se busquen planes, cursos, sumillas u horarios publicados."
+    verification_status: "live"
+
+  - id: "student-procedures"
+    title: "Trámites académicos - Portal del Estudiante"
+    url: "https://estudiante.pucp.edu.pe/tramites-y-certificaciones/"
+    domain: "estudiante.pucp.edu.pe"
+    categories: ["procedures", "withdrawal", "reincorporation", "validation", "certifications"]
+    target_audience: ["undergraduate", "postgraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se necesiten requisitos o canales vigentes para un trámite académico."
+    verification_status: "live"
+
+  - id: "digital-certifications"
+    title: "Certificaciones digitales PUCP"
+    url: "https://www.pucp.edu.pe/certificaciones"
+    domain: "www.pucp.edu.pe"
+    categories: ["document_verification", "degrees", "grade_certificates", "continuing_education_certificates"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "stable"
+    preferred_channel: "web"
+    consult_when: "Se requiera verificar un documento académico o certificado digital emitido por la PUCP."
+    verification_status: "live"
+
+  - id: "unit-directory"
+    title: "Directorio de unidades PUCP"
+    url: "https://www.pucp.edu.pe/la-universidad/directorio-de-unidades/"
+    domain: "www.pucp.edu.pe"
+    categories: ["faculties", "academic_units", "offices", "institutional_contacts"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se deba ubicar la facultad, oficina o unidad competente y su portal vigente."
+    verification_status: "live"
+
+  - id: "service-directory"
+    title: "Directorio de servicios PUCP"
+    url: "https://www.pucp.edu.pe/la-universidad/directorio-de-servicios/"
+    domain: "www.pucp.edu.pe"
+    categories: ["student_services", "health", "facilities", "support_channels"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se necesite encontrar el servicio institucional que atiende una necesidad concreta."
+    verification_status: "live"
+
+  - id: "disciplinary-regulation"
+    title: "Reglamento Unificado de Procedimientos Disciplinarios"
+    url: "https://reglamentodisciplinario.pucp.edu.pe/"
+    domain: "reglamentodisciplinario.pucp.edu.pe"
+    categories: ["disciplinary_rules", "due_process", "appeals"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "stable"
+    preferred_channel: "web"
+    consult_when: "Se necesite la norma disciplinaria institucional vigente."
+    verification_status: "officially_linked"
+    official_entrypoint: "institutional-documents"
+
+  - id: "university-ombuds-office"
+    title: "Defensoría Universitaria PUCP"
+    url: "https://defensoria.pucp.edu.pe/"
+    domain: "defensoria.pucp.edu.pe"
+    categories: ["student_rights", "questions", "complaints", "confidential_guidance"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Un estudiante necesite orientación sobre derechos, deberes, una consulta o una queja."
+    verification_status: "live"
+
+  - id: "library-portal"
+    title: "Sistema de Bibliotecas PUCP"
+    url: "https://biblioteca.pucp.edu.pe/"
+    domain: "biblioteca.pucp.edu.pe"
+    categories: ["library", "databases", "ebooks", "study_spaces", "research_support"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "mixed"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se busquen recursos bibliográficos, bases suscritas o servicios de biblioteca."
+    verification_status: "live"
+
+  - id: "institutional-repository"
+    title: "Repositorio Institucional PUCP"
+    url: "https://repositorio.pucp.edu.pe/"
+    domain: "repositorio.pucp.edu.pe"
+    categories: ["theses", "research", "open_access", "institutional_publications"]
+    target_audience: ["undergraduate", "postgraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "stable"
+    preferred_channel: "web"
+    consult_when: "Se busquen tesis, artículos u otros trabajos académicos producidos en la PUCP."
+    verification_status: "live"
+
+  - id: "journals-portal"
+    title: "Portal de Revistas PUCP"
+    url: "https://revistas.pucp.edu.pe/"
+    domain: "revistas.pucp.edu.pe"
+    categories: ["journals", "research", "academic_publications"]
+    target_audience: ["undergraduate", "postgraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "stable"
+    preferred_channel: "web"
+    consult_when: "Se busquen revistas académicas publicadas por facultades e institutos PUCP."
+    verification_status: "officially_linked"
+    official_entrypoint: "library-portal"
+
+  - id: "daes-portal"
+    title: "Dirección de Asuntos Estudiantiles (DAES)"
+    url: "https://daes.pucp.edu.pe/"
+    domain: "daes.pucp.edu.pe"
+    categories: ["wellbeing", "health", "psychological_support", "inclusion", "scholarships", "sports"]
+    target_audience: ["undergraduate", "postgraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se requiera bienestar, salud, apoyo psicológico, inclusión, becas o apoyo social."
+    verification_status: "live"
+
+  - id: "dti-portal"
+    title: "Dirección de Tecnologías de Información (DTI)"
+    url: "https://dti.pucp.edu.pe/"
+    domain: "dti.pucp.edu.pe"
+    categories: ["IT_support", "identity", "connectivity", "digital_services", "security"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se necesiten manuales, políticas o canales de soporte tecnológico."
+    verification_status: "live"
+
+  - id: "it-service-center"
+    title: "Centro de Servicios TI"
+    url: "https://serviciosdti.ivanticloud.com/service/"
+    domain: "serviciosdti.ivanticloud.com"
+    categories: ["IT_tickets", "access_problems", "incident_support"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "authenticated"
+    authority_level: "official_service"
+    stability: "dynamic"
+    preferred_channel: "browser"
+    consult_when: "El usuario necesite registrar o seguir una incidencia tecnológica."
+    verification_status: "officially_linked_third_party"
+    official_entrypoint: "dti-portal"
+
+  - id: "international-mobility"
+    title: "Internacionalización y movilidad estudiantil PUCP"
+    url: "https://internacional.pucp.edu.pe/"
+    domain: "internacional.pucp.edu.pe"
+    categories: ["exchange", "international_mobility", "DARI_scholarships", "calls"]
+    target_audience: ["undergraduate", "postgraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "per_cycle"
+    preferred_channel: "web"
+    consult_when: "Se consulten intercambios, convocatorias internacionales o apoyos DARI."
+    verification_status: "live"
+
+  - id: "employability-portal"
+    title: "Empleabilidad PUCP"
+    url: "https://empleabilidad.pucp.edu.pe/"
+    domain: "empleabilidad.pucp.edu.pe"
+    categories: ["internships", "jobs", "career_guidance", "employability_events"]
+    target_audience: ["undergraduate", "postgraduate"]
+    access_type: "mixed"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se busquen prácticas, empleos, talleres u orientación para la inserción laboral."
+    verification_status: "live"
+
+  - id: "continuing-education"
+    title: "Educación Continua PUCP"
+    url: "https://educacioncontinua.pucp.edu.pe/"
+    domain: "educacioncontinua.pucp.edu.pe"
+    categories: ["continuing_education", "courses", "programs", "diplomas"]
+    target_audience: ["continuing_education"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se consulte la oferta o información pública de Educación Continua."
+    verification_status: "live"
+
+  - id: "postgraduate-school"
+    title: "Escuela de Posgrado PUCP"
+    url: "https://posgrado.pucp.edu.pe/"
+    domain: "posgrado.pucp.edu.pe"
+    categories: ["postgraduate", "programs", "student_information", "regulations", "calendar"]
+    target_audience: ["postgraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "La consulta sea específica de maestrías, doctorados o trámites de posgrado."
+    verification_status: "live"
+
+  - id: "cide-pucp"
+    title: "Centro de Innovación y Desarrollo Emprendedor (CIDE-PUCP)"
+    url: "https://emprende.pucp.edu.pe/"
+    domain: "emprende.pucp.edu.pe"
+    categories: ["entrepreneurship", "incubation", "continuing_education"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se consulte formación o servicios de emprendimiento e innovación del CIDE."
+    verification_status: "live"
+
+  - id: "official-events-agenda"
+    title: "Agenda PUCP"
+    url: "https://agenda.pucp.edu.pe/"
+    domain: "agenda.pucp.edu.pe"
+    categories: ["events", "conferences", "workshops", "academic_calls"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se pregunten eventos, conferencias, talleres o actividades próximas."
+    verification_status: "live"
+
+  - id: "puntoedu-news"
+    title: "PuntoEdu PUCP"
+    url: "https://puntoedu.pucp.edu.pe/"
+    domain: "puntoedu.pucp.edu.pe"
+    categories: ["institutional_news", "announcements", "university_life"]
+    target_audience: ["undergraduate", "postgraduate", "continuing_education"]
+    access_type: "public"
+    authority_level: "official_communication"
+    stability: "dynamic"
+    preferred_channel: "web"
+    consult_when: "Se necesiten noticias o anuncios institucionales recientes."
+    verification_status: "officially_linked"
+
+  - id: "student-financial-information"
+    title: "Información económica - Portal del Estudiante"
+    url: "https://estudiante.pucp.edu.pe/informacion-economica/"
+    domain: "estudiante.pucp.edu.pe"
+    categories: ["tuition_scales", "credit_value", "payment_calendar", "payment_methods"]
+    target_audience: ["undergraduate", "postgraduate"]
+    access_type: "public"
+    authority_level: "primary"
+    stability: "per_cycle"
+    preferred_channel: "web"
+    consult_when: "Se consulten escalas, valor del crédito, calendario o modalidades públicas de pago."
+    verification_status: "live"

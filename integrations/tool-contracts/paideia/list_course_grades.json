@@ -1,0 +1,24 @@
+{
+  "name": "list_course_grades",
+  "description": "Return cached rows from the authenticated student's own visible Moodle grade report.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "course": {
+        "type": "string",
+        "minLength": 1
+      },
+      "query": {
+        "type": "string"
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Start a metadata refresh when true while returning the last good cache."
+      }
+    },
+    "required": [
+      "course"
+    ],
+    "additionalProperties": false
+  }
+}

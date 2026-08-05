@@ -1,0 +1,23 @@
+{
+  "name": "list_courses",
+  "description": "List normalized cached courses with their Pregrado/Posgrado or Educación Continua area.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string"
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Start a metadata refresh when true while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

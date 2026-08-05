@@ -1,0 +1,21 @@
+{
+  "name": "sync_paideia",
+  "description": "Queue a headless, metadata-only refresh of Pregrado/Posgrado and Educación Continua. Never downloads files or opens quiz attempts.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "courseConcurrency": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6
+      },
+      "detailConcurrency": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 8
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

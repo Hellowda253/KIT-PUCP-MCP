@@ -1,0 +1,35 @@
+{
+  "name": "search_materials",
+  "description": "Search cached material metadata; does not download or open files.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "course": {
+        "type": "string",
+        "minLength": 1
+      },
+      "section": {
+        "type": "string",
+        "minLength": 1
+      },
+      "type": {
+        "type": "string",
+        "minLength": 1
+      },
+      "query": {
+        "type": "string"
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 80
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Start a metadata refresh when true while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

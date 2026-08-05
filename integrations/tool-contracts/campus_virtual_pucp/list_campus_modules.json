@@ -1,0 +1,15 @@
+{
+  "name": "list_campus_modules",
+  "description": "List cached visible Campus modules with supported/unavailable state and alerts only.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

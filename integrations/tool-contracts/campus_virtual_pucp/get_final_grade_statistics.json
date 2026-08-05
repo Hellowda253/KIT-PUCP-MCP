@@ -1,0 +1,31 @@
+{
+  "name": "get_final_grade_statistics",
+  "description": "Fetch or return cached institutional Campus statistics for one final course grade, including mean, median, deviation, pass rates, and distribution.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "course": {
+        "type": "string",
+        "minLength": 1
+      },
+      "term": {
+        "type": "string",
+        "pattern": "^\\d{4}-\\d+$"
+      },
+      "schedule": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [
+      "course",
+      "term"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "get_activity_details",
+  "description": "Return cached safe overview details for an assignment or quiz; never opens an attempt.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "activity": {
+        "type": "string",
+        "minLength": 1
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Start a metadata refresh when true while returning the last good cache."
+      }
+    },
+    "required": [
+      "activity"
+    ],
+    "additionalProperties": false
+  }
+}

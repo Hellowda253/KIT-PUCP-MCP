@@ -1,0 +1,22 @@
+{
+  "name": "commit_course_registration",
+  "description": "In verified regular enrollment only and after explicit user confirmation, consume one prepared token and save exactly that registration diff once; never performs final matrícula or any other form action.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "confirmationToken": {
+        "type": "string",
+        "minLength": 16,
+        "maxLength": 200
+      },
+      "confirmed": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "confirmationToken",
+      "confirmed"
+    ],
+    "additionalProperties": false
+  }
+}

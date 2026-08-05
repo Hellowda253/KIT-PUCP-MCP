@@ -1,0 +1,85 @@
+{
+  "name": "prepare_course_registration",
+  "description": "In verified regular enrollment only, prepare an exact live add/remove registration diff and a five-minute one-use token; this tool never writes to Campus and its result must be shown for explicit confirmation.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "add": {
+        "type": "array",
+        "maxItems": 20,
+        "uniqueItems": true,
+        "items": {
+          "type": "object",
+          "properties": {
+            "courseCode": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{3,15}$"
+            },
+            "scheduleId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 15
+            },
+            "scheduleType": {
+              "type": "string",
+              "enum": [
+                "class",
+                "practice",
+                "exam",
+                "laboratory",
+                "directed_practice",
+                "workshop",
+                "advising"
+              ],
+              "description": "Optional only when Campus publishes more than one component with the same schedule id."
+            }
+          },
+          "required": [
+            "courseCode",
+            "scheduleId"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "remove": {
+        "type": "array",
+        "maxItems": 20,
+        "uniqueItems": true,
+        "items": {
+          "type": "object",
+          "properties": {
+            "courseCode": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{3,15}$"
+            },
+            "scheduleId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 15
+            },
+            "scheduleType": {
+              "type": "string",
+              "enum": [
+                "class",
+                "practice",
+                "exam",
+                "laboratory",
+                "directed_practice",
+                "workshop",
+                "advising"
+              ],
+              "description": "Optional only when Campus publishes more than one component with the same schedule id."
+            }
+          },
+          "required": [
+            "courseCode",
+            "scheduleId"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Horario PUCP</title>
+  <style>
+    :root {
+      --font-main: "Segoe UI", Arial, sans-serif;
+      --bg-page: #f8fafc;
+      --bg-surface: #ffffff;
+      --border-subtle: #cbd5e1;
+      --grid-line: #cbd5e1;
+      --text-heading: #0f172a;
+      --text-body: #1e293b;
+      --text-muted: #475569;
+      --class-bg: #e6f4ea;
+      --class-border: #34a853;
+      --class-text: #0b3d1d;
+      --class-header: #1b5e20;
+      --lab-bg: #e8f0fe;
+      --lab-border: #4285f4;
+      --lab-text: #0b2559;
+      --lab-header: #0d47a1;
+      --exam-bg: #fce8e6;
+      --exam-border: #ea4335;
+      --exam-text: #4a0703;
+      --exam-header: #b71c1c;
+      --hour-height: 40px;
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+      --shadow-md: 0 3px 8px rgba(15, 23, 42, 0.08);
+    }
+
+    body.theme-dark {
+      --bg-page: #0f172a;
+      --bg-surface: #1e293b;
+      --border-subtle: #475569;
+      --grid-line: #334155;
+      --text-heading: #f8fafc;
+      --text-body: #cbd5e1;
+      --text-muted: #94a3b8;
+      --class-bg: rgba(16, 185, 129, 0.16);
+      --class-border: #10b981;
+      --class-text: #a7f3d0;
+      --class-header: #047857;
+      --lab-bg: rgba(14, 165, 233, 0.16);
+      --lab-border: #06b6d4;
+      --lab-text: #bae6fd;
+      --lab-header: #0369a1;
+      --exam-bg: rgba(244, 63, 94, 0.16);
+      --exam-border: #f43f5e;
+      --exam-text: #fecdd3;
+      --exam-header: #be123c;
+      --shadow-sm: none;
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.28);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      color: var(--text-body);
+      background: var(--bg-page);
+      font-family: var(--font-main);
+      line-height: 1.4;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button { font: inherit; }
+    button:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+    .app-container { max-width: 1280px; margin: 0 auto; }
+
+    .header-bar,
+    .sub-bar,
+    .timetable-card,
+    .data-card,
+    .mobile-day {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .header-bar,
+    .sub-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+      border-radius: 8px;
+    }
+
+    .header-bar { margin-bottom: 12px; }
+    .sub-bar { margin-bottom: 14px; flex-wrap: wrap; }
+
+    .brand-title {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0;
+      color: var(--text-heading);
+      font-size: 1.15rem;
+      font-weight: 750;
+      letter-spacing: -0.01em;
+    }
+
+    .badge-term {
+      padding: 3px 8px;
+      border-radius: 4px;
+      color: var(--bg-surface);
+      background: var(--text-heading);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .controls-group,
+    .legend-list,
+    .legend-item,
+    .segment-control {
+      display: flex;
+      align-items: center;
+    }
+
+    .controls-group { gap: 8px; }
+    .legend-list { gap: 16px; flex-wrap: wrap; font-size: 0.78rem; font-weight: 650; }
+    .legend-item { gap: 6px; }
+
+    .legend-swatch {
+      width: 12px;
+      height: 12px;
+      border: 1px solid;
+      border-radius: 2px;
+    }
+
+    .legend-swatch.class { background: var(--class-bg); border-color: var(--class-border); }
+    .legend-swatch.lab { background: var(--lab-bg); border-color: var(--lab-border); }
+    .legend-swatch.exam { background: var(--exam-bg); border-color: var(--exam-border); }
+
+    .btn-action,
+    .segment-btn {
+      min-height: 34px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 0.76rem;
+      font-weight: 700;
+    }
+
+    .btn-action {
+      padding: 6px 12px;
+      color: var(--text-heading);
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .btn-action:hover { background: var(--bg-page); }
+
+    .segment-control {
+      padding: 2px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      background: var(--bg-page);
+    }
+
+    .segment-btn {
+      padding: 6px 12px;
+      color: var(--text-muted);
+      background: transparent;
+      border: 0;
+    }
+
+    .segment-btn.active {
+      color: var(--text-heading);
+      background: var(--bg-surface);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .timetable-card {
+      margin-bottom: 20px;
+      overflow-x: auto;
+      border-radius: 8px;
+      box-shadow: var(--shadow-md);
+    }
+
+    .timetable-grid {
+      display: grid;
+      min-width: 960px;
+      grid-template-columns: 60px repeat(6, minmax(150px, 1fr));
+    }
+
+    .col-header {
+      padding: 8px;
+      color: var(--text-heading);
+      background: var(--bg-page);
+      border-right: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: center;
+      text-transform: uppercase;
+      font-size: 0.74rem;
+      font-weight: 750;
+      letter-spacing: 0.025em;
+    }
+
+    .col-header:last-child,
+    .day-col:last-child { border-right: 0; }
+
+    .time-col,
+    .day-col {
+      display: grid;
+      grid-template-rows: repeat(15, var(--hour-height));
+    }
+
+    .time-col {
+      grid-column: 1;
+      background: var(--bg-page);
+      border-right: 1px solid var(--border-subtle);
+    }
+
+    .day-col {
+      position: relative;
+      border-right: 1px solid var(--border-subtle);
+    }
+
+    .time-slot,
+    .grid-cell {
+      min-height: var(--hour-height);
+      border-bottom: 1px solid var(--grid-line);
+    }
+
+    .time-slot {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      font-size: 0.68rem;
+      font-weight: 650;
+    }
+
+    .event-box {
+      position: absolute;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid;
+      border-radius: 4px;
+    }
+
+    .event-top {
+      padding: 2px 4px;
+      color: #fff;
+      text-align: center;
+      font-size: 0.61rem;
+      font-weight: 750;
+    }
+
+    .event-content {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 0;
+      padding: 4px 6px;
+    }
+
+    .event-code,
+    .event-title,
+    .event-details {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .event-code { font-size: 0.63rem; font-weight: 750; white-space: nowrap; }
+    .event-title { font-size: 0.68rem; font-weight: 750; line-height: 1.2; }
+    .event-details { margin-top: 2px; font-size: 0.61rem; font-weight: 650; }
+
+    .type-class { color: var(--class-text); background: var(--class-bg); border-color: var(--class-border); }
+    .type-class .event-top { background: var(--class-header); }
+    .type-lab { color: var(--lab-text); background: var(--lab-bg); border-color: var(--lab-border); }
+    .type-lab .event-top { background: var(--lab-header); }
+    .type-exam { color: var(--exam-text); background: var(--exam-bg); border-color: var(--exam-border); }
+    .type-exam .event-top { background: var(--exam-header); }
+
+    @media screen {
+      .event-box {
+        transition: left 140ms ease, width 140ms ease, opacity 110ms ease,
+          transform 140ms ease, box-shadow 140ms ease;
+      }
+
+      .event-box:hover,
+      .event-box:focus-visible {
+        transform: translateY(-1px);
+        outline: 2px solid currentColor;
+        outline-offset: 1px;
+        box-shadow: 0 7px 18px rgba(15, 23, 42, 0.22);
+      }
+
+      .event-box.event-expanded {
+        left: 3px !important;
+        width: calc(100% - 6px) !important;
+        z-index: 20;
+      }
+
+      .event-box.event-obscured {
+        opacity: 0;
+        pointer-events: none;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .event-box { transition: none; }
+    }
+
+    body.mode-classes .type-exam { display: none; }
+    body.mode-exams .type-class,
+    body.mode-exams .type-lab { display: none; }
+
+    .mobile-agenda { display: none; }
+
+    .data-card {
+      padding: 16px 18px;
+      border-radius: 8px;
+    }
+
+    .data-card h2,
+    .mobile-agenda h2 {
+      margin: 0 0 12px;
+      color: var(--text-heading);
+      font-size: 0.96rem;
+      font-weight: 750;
+    }
+
+    .table-wrapper { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); text-align: left; }
+    th { color: var(--text-heading); background: var(--bg-page); font-size: 0.68rem; font-weight: 750; text-transform: uppercase; }
+    td { color: var(--text-body); font-weight: 600; }
+    tr:last-child td { border-bottom: 0; }
+
+    .tag {
+      display: inline-block;
+      padding: 1px 5px;
+      border: 1px solid;
+      border-radius: 3px;
+      font-size: 0.65rem;
+      font-weight: 650;
+    }
+
+    .tag.lab { color: var(--lab-text); background: var(--lab-bg); border-color: var(--lab-border); }
+    .tag.exam { color: var(--exam-text); background: var(--exam-bg); border-color: var(--exam-border); }
+    .empty-state { padding: 14px; color: var(--text-muted); font-size: 0.82rem; }
+
+    @media (max-width: 760px) {
+      body { padding: 8px; }
+      .header-bar, .sub-bar { align-items: stretch; padding: 12px; }
+      .header-bar, .sub-bar, .controls-group { flex-direction: column; }
+      .controls-group { width: 100%; }
+      .btn-action { width: 100%; }
+      .segment-control { display: grid; width: 100%; grid-template-columns: 1fr; }
+      .segment-btn { width: 100%; text-align: left; }
+      .timetable-card { display: none; }
+      .mobile-agenda { display: block; }
+      .mobile-day { margin-bottom: 10px; overflow: hidden; border-radius: 6px; }
+      .mobile-day h3 { margin: 0; padding: 8px 10px; color: var(--text-heading); background: var(--bg-page); font-size: 0.8rem; }
+      .mobile-event { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 9px 10px; border-top: 1px solid var(--border-subtle); }
+      .mobile-event-time { color: var(--text-muted); font-size: 0.75rem; font-weight: 750; }
+      .mobile-event-title { color: var(--text-heading); font-size: 0.8rem; font-weight: 750; }
+      .mobile-event-details { margin-top: 2px; color: var(--text-muted); font-size: 0.72rem; }
+      body.mode-classes .mobile-event.type-exam,
+      body.mode-exams .mobile-event.type-class,
+      body.mode-exams .mobile-event.type-lab { display: none; }
+      .data-card { padding: 14px 12px; }
+    }
+
+    @page { size: A4 landscape; margin: 8mm; }
+
+    @media print {
+      :root { --hour-height: 30px; }
+      body.theme-dark {
+        --bg-page: #fff;
+        --bg-surface: #fff;
+        --border-subtle: #cbd5e1;
+        --grid-line: #cbd5e1;
+        --text-heading: #0f172a;
+        --text-body: #1e293b;
+        --text-muted: #475569;
+        --class-bg: #e6f4ea;
+        --class-text: #0b3d1d;
+        --lab-bg: #e8f0fe;
+        --lab-text: #0b2559;
+        --exam-bg: #fce8e6;
+        --exam-text: #4a0703;
+      }
+      body { padding: 0; color: #1e293b; background: #fff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .app-container { max-width: none; }
+      .header-bar, .sub-bar, .timetable-card, .data-card { border-color: #cbd5e1; box-shadow: none; }
+      .controls-group, .segment-control, .mobile-agenda { display: none !important; }
+      .header-bar { padding: 8px 10px; }
+      .sub-bar { padding: 7px 10px; }
+      .timetable-card { display: block !important; overflow: visible; break-inside: avoid; }
+      .timetable-grid { min-width: 0; grid-template-columns: 52px repeat(6, minmax(0, 1fr)); }
+      .event-title { font-size: 0.61rem; }
+      .event-details { font-size: 0.56rem; }
+      .data-card { break-before: page; box-shadow: none; }
+    }
+  </style>
+</head>
+<body class="mode-all">
+  <main class="app-container">
+    <header class="header-bar">
+      <h1 class="brand-title">
+        <span id="schedule-title">Horario PUCP</span>
+        <span class="badge-term" id="credits-badge">0 créditos / 0 cursos</span>
+      </h1>
+      <div class="controls-group" aria-label="Acciones del horario">
+        <button class="btn-action" id="theme-toggle" type="button" aria-pressed="false">Tema oscuro</button>
+        <button class="btn-action" id="print-button" type="button">Guardar como PDF</button>
+      </div>
+    </header>
+
+    <section class="sub-bar" aria-label="Leyenda y vista">
+      <div class="legend-list" aria-label="Tipos de sesión">
+        <div class="legend-item"><span class="legend-swatch class" aria-hidden="true"></span><span>Clases teóricas</span></div>
+        <div class="legend-item"><span class="legend-swatch lab" aria-hidden="true"></span><span>Laboratorios / prácticas</span></div>
+        <div class="legend-item"><span class="legend-swatch exam" aria-hidden="true"></span><span>Exámenes</span></div>
+      </div>
+      <div class="segment-control" aria-label="Vista del horario">
+        <button class="segment-btn active" id="mode-all" type="button" data-mode="all" aria-pressed="true">Vista completa</button>
+        <button class="segment-btn" id="mode-classes" type="button" data-mode="classes" aria-pressed="false">Semanas de clase</button>
+        <button class="segment-btn" id="mode-exams" type="button" data-mode="exams" aria-pressed="false">Semanas de exámenes</button>
+      </div>
+    </section>
+
+    <section class="timetable-card" aria-label="Horario semanal">
+      <div class="timetable-grid" id="timetable-grid"></div>
+    </section>
+
+    <section class="mobile-agenda" aria-labelledby="mobile-agenda-title">
+      <h2 id="mobile-agenda-title">Agenda semanal</h2>
+      <div id="mobile-agenda-days"></div>
+    </section>
+
+    <section class="data-card" aria-labelledby="course-detail-title">
+      <h2 id="course-detail-title">Detalle de asignaturas y evaluaciones</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Código</th><th>Asignatura</th><th>Créditos</th><th>Horario</th>
+              <th>Docente</th><th>Clases teóricas</th><th>Práctica / Lab</th><th>Exámenes</th>
+            </tr>
+          </thead>
+          <tbody id="course-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script id="schedule-data" type="application/json">
+{
+  "term": "",
+  "credits": 0,
+  "courses": [],
+  "sessions": []
+}
+  </script>
+  <script>
+    (() => {
+      "use strict";
+
+      const DAYS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+      const START_MINUTES = 7 * 60;
+      const END_MINUTES = 22 * 60;
+      const DAY_MINUTES = END_MINUTES - START_MINUTES;
+      const TYPE_LABELS = { class: "Clase", lab: "Práctica / Lab", exam: "Examen" };
+
+      const data = JSON.parse(document.getElementById("schedule-data").textContent);
+      const courses = Array.isArray(data.courses) ? data.courses : [];
+      const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+      let activeMode = "all";
+
+      function element(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      }
+
+      function minutes(value) {
+        const [hour, minute] = String(value).split(":").map(Number);
+        return (hour * 60) + minute;
+      }
+
+      function validSession(session) {
+        const start = minutes(session.start);
+        const end = minutes(session.end);
+        return Number.isInteger(session.day) && session.day >= 1 && session.day <= 6 &&
+          Number.isFinite(start) && Number.isFinite(end) && start >= START_MINUTES && end <= END_MINUTES && end > start &&
+          Object.hasOwn(TYPE_LABELS, session.type);
+      }
+
+      function sessionLabel(session) {
+        const codes = Array.isArray(session.courseCodes) ? session.courseCodes.join(" / ") : "";
+        return session.type === "exam" ? `${codes} — EXAMEN` : `${codes} — H${session.scheduleId ?? ""}`;
+      }
+
+      function sessionDetails(session) {
+        return [session.room, session.instructor].filter(Boolean).join(" • ");
+      }
+
+      function sessionsOverlap(left, right) {
+        return Number(left.dataset.startMinutes) < Number(right.dataset.endMinutes) &&
+          Number(right.dataset.startMinutes) < Number(left.dataset.endMinutes);
+      }
+
+      function clearEventFocus(dayColumn) {
+        dayColumn.querySelectorAll(".event-box").forEach((event) => {
+          event.classList.remove("event-expanded", "event-obscured");
+        });
+      }
+
+      function activateEventFocus(event) {
+        const dayColumn = event.closest(".day-col");
+        if (!dayColumn) return;
+        clearEventFocus(dayColumn);
+        event.classList.add("event-expanded");
+        dayColumn.querySelectorAll(".event-box").forEach((peer) => {
+          if (peer !== event && sessionsOverlap(event, peer)) {
+            peer.classList.add("event-obscured");
+          }
+        });
+      }
+
+      function sessionIsVisible(session) {
+        if (activeMode === "classes") return session.type !== "exam";
+        if (activeMode === "exams") return session.type === "exam";
+        return true;
+      }
+
+      function layoutDaySessions(daySessions, toMinutes) {
+        const sorted = [...daySessions].sort((a, b) =>
+          toMinutes(a.start) - toMinutes(b.start) || toMinutes(a.end) - toMinutes(b.end)
+        );
+        const groups = [];
+        let current = [];
+        let currentEnd = -1;
+        for (const session of sorted) {
+          const start = toMinutes(session.start);
+          if (current.length && start >= currentEnd) {
+            groups.push(current);
+            current = [];
+            currentEnd = -1;
+          }
+          current.push(session);
+          currentEnd = Math.max(currentEnd, toMinutes(session.end));
+        }
+        if (current.length) groups.push(current);
+
+        return groups.flatMap((group) => {
+          const laneEnds = [];
+          const placed = group.map((session) => {
+            const start = toMinutes(session.start);
+            let lane = laneEnds.findIndex((end) => end <= start);
+            if (lane < 0) lane = laneEnds.length;
+            laneEnds[lane] = toMinutes(session.end);
+            return { session, lane };
+          });
+          const lanes = Math.max(1, laneEnds.length);
+          return placed.map(({ session, lane }) => ({ session, lane, lanes }));
+        });
+      }
+
+      function formatScheduleSummary(data) {
+        const courseCount = data.courses.length;
+        const courseLabel = courseCount === 1 ? "curso" : "cursos";
+        return `${Number(data.credits || 0).toFixed(1)} créditos / ${courseCount} ${courseLabel}`;
+      }
+
+      function renderHeader() {
+        const summary = formatScheduleSummary(data);
+        document.title = `Horario ${data.term || "PUCP"} (${summary})`;
+        document.getElementById("schedule-title").textContent = data.term ? `Horario ${data.term}` : "Horario PUCP";
+        document.getElementById("credits-badge").textContent = summary;
+      }
+
+      function renderDesktop() {
+        const grid = document.getElementById("timetable-grid");
+        grid.replaceChildren();
+        ["Hora", ...DAYS].forEach((label) => grid.append(element("div", "col-header", label)));
+
+        const timeColumn = element("div", "time-col");
+        for (let hour = 7; hour < 22; hour += 1) {
+          timeColumn.append(element("div", "time-slot", `${String(hour).padStart(2, "0")}:00`));
+        }
+        grid.append(timeColumn);
+
+        DAYS.forEach((_, dayIndex) => {
+          const dayColumn = element("div", "day-col");
+          for (let hour = 7; hour < 22; hour += 1) dayColumn.append(element("div", "grid-cell"));
+          const daySessions = sessions.filter((session) =>
+            validSession(session) && sessionIsVisible(session) && session.day === dayIndex + 1
+          );
+          for (const { session, lane, lanes } of layoutDaySessions(daySessions, minutes)) {
+            const start = minutes(session.start);
+            const end = minutes(session.end);
+            const event = element("article", `event-box type-${session.type}`);
+            const topPercent = ((start - START_MINUTES) / DAY_MINUTES) * 100;
+            const heightPercent = ((end - start) / DAY_MINUTES) * 100;
+            event.style.top = `calc(${topPercent}% + 2px)`;
+            event.style.height = `calc(${heightPercent}% - 4px)`;
+            event.style.left = `calc(${(lane * 100) / lanes}% + 3px)`;
+            event.style.width = `calc(${100 / lanes}% - 6px)`;
+            event.dataset.startMinutes = String(start);
+            event.dataset.endMinutes = String(end);
+            event.tabIndex = 0;
+            event.setAttribute("aria-label", `${TYPE_LABELS[session.type]} ${sessionLabel(session)}, ${session.start} a ${session.end}`);
+            event.append(element("div", "event-top", `${session.start} – ${session.end}${session.weeksLabel ? ` (${session.weeksLabel})` : ""}`));
+            const content = element("div", "event-content");
+            const heading = element("div");
+            heading.append(element("div", "event-code", sessionLabel(session)));
+            heading.append(element("div", "event-title", session.title || ""));
+            content.append(heading);
+            content.append(element("div", "event-details", sessionDetails(session)));
+            event.append(content);
+            event.addEventListener("pointerenter", () => activateEventFocus(event));
+            event.addEventListener("pointerleave", () => {
+              if (document.activeElement !== event) clearEventFocus(dayColumn);
+            });
+            event.addEventListener("focus", () => activateEventFocus(event));
+            event.addEventListener("blur", () => {
+              if (!event.matches(":hover")) clearEventFocus(dayColumn);
+            });
+            dayColumn.append(event);
+          }
+          grid.append(dayColumn);
+        });
+      }
+
+      function renderMobile() {
+        const container = document.getElementById("mobile-agenda-days");
+        container.replaceChildren();
+        DAYS.forEach((dayName, dayIndex) => {
+          const day = element("section", "mobile-day");
+          day.append(element("h3", "", dayName));
+          const daySessions = sessions
+            .filter((session) => validSession(session) && session.day === dayIndex + 1)
+            .sort((a, b) => minutes(a.start) - minutes(b.start));
+          if (!daySessions.length) {
+            day.append(element("div", "empty-state", "Sin sesiones"));
+          } else {
+            daySessions.forEach((session) => {
+              const item = element("article", `mobile-event type-${session.type}`);
+              item.append(element("div", "mobile-event-time", `${session.start} – ${session.end}`));
+              const detail = element("div");
+              detail.append(element("div", "mobile-event-title", `${sessionLabel(session)} · ${session.title || ""}`));
+              detail.append(element("div", "mobile-event-details", [TYPE_LABELS[session.type], sessionDetails(session), session.weeksLabel].filter(Boolean).join(" · ")));
+              item.append(detail);
+              day.append(item);
+            });
+          }
+          container.append(day);
+        });
+      }
+
+      function addCell(row, text, className) {
+        const cell = element("td");
+        if (className && text && text !== "—") cell.append(element("span", `tag ${className}`, text));
+        else cell.textContent = text ?? "—";
+        row.append(cell);
+      }
+
+      function renderCourses() {
+        const body = document.getElementById("course-table-body");
+        body.replaceChildren();
+        if (!courses.length) {
+          const row = element("tr");
+          const cell = element("td", "empty-state", "Sin asignaturas");
+          cell.colSpan = 8;
+          row.append(cell);
+          body.append(row);
+          return;
+        }
+        courses.forEach((course) => {
+          const row = element("tr");
+          [course.code, course.name, Number(course.credits || 0).toFixed(1), course.scheduleId, course.instructor, course.classes]
+            .forEach((value) => addCell(row, value));
+          addCell(row, course.practice, "lab");
+          addCell(row, course.exams, "exam");
+          body.append(row);
+        });
+      }
+
+      function setMode(mode) {
+        activeMode = mode;
+        document.body.classList.remove("mode-all", "mode-classes", "mode-exams");
+        document.body.classList.add(`mode-${mode}`);
+        document.querySelectorAll("[data-mode]").forEach((button) => {
+          const active = button.dataset.mode === mode;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
+        renderDesktop();
+      }
+
+      document.querySelectorAll("[data-mode]").forEach((button) => {
+        button.addEventListener("click", () => setMode(button.dataset.mode));
+      });
+      document.getElementById("theme-toggle").addEventListener("click", (event) => {
+        const dark = document.body.classList.toggle("theme-dark");
+        event.currentTarget.textContent = dark ? "Tema claro" : "Tema oscuro";
+        event.currentTarget.setAttribute("aria-pressed", String(dark));
+      });
+      document.getElementById("print-button").addEventListener("click", () => window.print());
+
+      renderHeader();
+      renderDesktop();
+      renderMobile();
+      renderCourses();
+    })();
+  </script>
+</body>
+</html>

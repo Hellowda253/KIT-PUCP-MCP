@@ -1,0 +1,10 @@
+{
+  "name": "get_campus_status",
+  "description": "Report local Campus cache/module/job status and alerts without contacting PUCP.",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  }
+}

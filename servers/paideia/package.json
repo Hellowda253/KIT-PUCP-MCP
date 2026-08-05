@@ -1,0 +1,15 @@
+{
+  "name": "@pucp-academic-mcp/paideia",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@pucp-academic-mcp/common": "*",
+    "playwright": "^1.61.1"
+  }
+}

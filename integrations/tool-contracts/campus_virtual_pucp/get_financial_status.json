@@ -1,0 +1,15 @@
+{
+  "name": "get_financial_status",
+  "description": "Read-only financial summary with amounts, due dates, payment dates, and status; never pays.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

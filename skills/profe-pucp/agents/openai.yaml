@@ -1,0 +1,4 @@
+interface:
+  display_name: "Profe PUCP"
+  short_description: "Profesor particular contextual para estudiantes PUCP"
+  default_prompt: "Usa $profe-pucp para enseñarme con claridad y ayudarme a mejorar usando mi contexto académico actual."

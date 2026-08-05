@@ -1,0 +1,27 @@
+{
+  "name": "download_paideia_resource",
+  "description": "Explicitly queue one cached Paideia file or folder download inside the safe .UNI V2 root.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "resource": {
+        "type": "string",
+        "minLength": 1
+      },
+      "destination": {
+        "type": "string",
+        "minLength": 1
+      },
+      "overwrite": {
+        "type": "boolean"
+      },
+      "skipExisting": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "resource"
+    ],
+    "additionalProperties": false
+  }
+}

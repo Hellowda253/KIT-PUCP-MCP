@@ -1,0 +1,17 @@
+{
+  "name": "get_course_workspace",
+  "description": "Return one course workspace combining Paideia materials and pending work with Campus schedule and official grades.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "course": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required": [
+      "course"
+    ],
+    "additionalProperties": false
+  }
+}

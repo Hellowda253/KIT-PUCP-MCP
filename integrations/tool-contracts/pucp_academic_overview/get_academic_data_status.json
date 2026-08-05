@@ -1,0 +1,10 @@
+{
+  "name": "get_academic_data_status",
+  "description": "Return availability, freshness, and generation timestamps for both academic caches.",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  }
+}

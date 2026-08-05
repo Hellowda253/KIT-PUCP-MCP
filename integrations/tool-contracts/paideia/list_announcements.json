@@ -1,0 +1,29 @@
+{
+  "name": "list_announcements",
+  "description": "List identifiable posts from a dedicated course announcements/news forum.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "course": {
+        "type": "string",
+        "minLength": 1
+      },
+      "query": {
+        "type": "string"
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Start a metadata refresh when true while returning the last good cache."
+      }
+    },
+    "required": [
+      "course"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "get_registration_portal_status",
+  "description": "Read the live active-registration view status, mode (regular or extemporaneous), term, enrollment turn, and course/credit totals without exposing identity or session fields.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

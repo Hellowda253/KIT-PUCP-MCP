@@ -1,0 +1,178 @@
+const refreshProperties = {
+  forceRefresh: {
+    type: "boolean",
+    description: "Start a metadata refresh when true while returning the last good cache."
+  }
+};
+
+const filterProperties = {
+  course: { type: "string", minLength: 1 },
+  section: { type: "string", minLength: 1 },
+  type: { type: "string", minLength: 1 },
+  query: { type: "string" },
+  limit: { type: "integer", minimum: 1 },
+  ...refreshProperties
+};
+
+function schema(properties = {}, required = []) {
+  return {
+    type: "object",
+    properties,
+    required,
+    additionalProperties: false
+  };
+}
+
+export function createPaideiaTools(service) {
+  return [
+    {
+      name: "get_paideia_status",
+      description: "Report local Paideia cache freshness and background job state without contacting PUCP.",
+      inputSchema: schema(),
+      handler: () => service.getStatus()
+    },
+    {
+      name: "sync_paideia",
+      description: "Queue a headless, metadata-only refresh of Pregrado/Posgrado and Educación Continua. Never downloads files or opens quiz attempts.",
+      inputSchema: schema({
+        courseConcurrency: { type: "integer", minimum: 1, maximum: 6 },
+        detailConcurrency: { type: "integer", minimum: 1, maximum: 8 }
+      }),
+      handler: (args) => service.syncPaideia(args)
+    },
+    {
+      name: "get_paideia_job_status",
+      description: "Return status and safe results for a Paideia sync or download job.",
+      inputSchema: schema({
+        jobId: { type: "string", minLength: 1 }
+      }, ["jobId"]),
+      handler: (args) => service.getJobStatus(args)
+    },
+    {
+      name: "list_courses",
+      description: "List normalized cached courses with their Pregrado/Posgrado or Educación Continua area.",
+      inputSchema: schema({
+        query: { type: "string" },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+        ...refreshProperties
+      }),
+      handler: (args) => service.listCourses(args)
+    },
+    {
+      name: "get_course_outline",
+      description: "Return cached sections and compact activity samples for one unambiguous course.",
+      inputSchema: schema({
+        course: { type: "string", minLength: 1 },
+        maxSections: { type: "integer", minimum: 1, maximum: 60 },
+        sampleLimit: { type: "integer", minimum: 1, maximum: 20 },
+        ...refreshProperties
+      }, ["course"]),
+      handler: (args) => service.getCourseOutline(args)
+    },
+    {
+      name: "list_activities",
+      description: "Filter normalized cached Paideia activities by course, section, type, or text.",
+      inputSchema: schema({
+        ...filterProperties,
+        limit: { type: "integer", minimum: 1, maximum: 200 }
+      }),
+      handler: (args) => service.listActivities(args)
+    },
+    {
+      name: "get_activity_details",
+      description: "Return cached safe overview details for an assignment or quiz; never opens an attempt.",
+      inputSchema: schema({
+        activity: { type: "string", minLength: 1 },
+        ...refreshProperties
+      }, ["activity"]),
+      handler: (args) => service.getActivityDetails(args)
+    },
+    {
+      name: "list_pending_items",
+      description: "List cached assignments and quizzes with deterministic filters and ordering.",
+      inputSchema: schema({
+        ...filterProperties,
+        type: { enum: ["assignment", "quiz"] },
+        limit: { type: "integer", minimum: 1, maximum: 100 }
+      }),
+      handler: (args) => service.listPendingItems(args)
+    },
+    {
+      name: "list_next_pending_items",
+      description: "Return the nearest dated cached assignments and quizzes.",
+      inputSchema: schema({
+        course: { type: "string", minLength: 1 },
+        includePast: { type: "boolean" },
+        limit: { type: "integer", minimum: 1, maximum: 30 },
+        ...refreshProperties
+      }),
+      handler: (args) => service.listNextPendingItems(args)
+    },
+    {
+      name: "list_announcements",
+      description: "List identifiable posts from a dedicated course announcements/news forum.",
+      inputSchema: schema({
+        course: { type: "string", minLength: 1 },
+        query: { type: "string" },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+        ...refreshProperties
+      }, ["course"]),
+      handler: (args) => service.listAnnouncements(args)
+    },
+    {
+      name: "list_course_grades",
+      description: "Return cached rows from the authenticated student's own visible Moodle grade report.",
+      inputSchema: schema({
+        course: { type: "string", minLength: 1 },
+        query: { type: "string" },
+        ...refreshProperties
+      }, ["course"]),
+      handler: (args) => service.listCourseGrades(args)
+    },
+    {
+      name: "search_materials",
+      description: "Search cached material metadata; does not download or open files.",
+      inputSchema: schema({
+        ...filterProperties,
+        limit: { type: "integer", minimum: 1, maximum: 80 }
+      }),
+      handler: (args) => service.searchMaterials(args)
+    },
+    {
+      name: "list_material_changes",
+      description: "Summarize additions, removals, and metadata changes across recent Paideia syncs.",
+      inputSchema: schema({
+        limit: { type: "integer", minimum: 1, maximum: 50 }
+      }),
+      handler: (args) => service.listMaterialChanges(args)
+    },
+    {
+      name: "download_paideia_resource",
+      description: "Explicitly queue one cached Paideia file or folder download inside the safe .UNI V2 root.",
+      inputSchema: schema({
+        resource: { type: "string", minLength: 1 },
+        destination: { type: "string", minLength: 1 },
+        overwrite: { type: "boolean" },
+        skipExisting: { type: "boolean" }
+      }, ["resource"]),
+      handler: (args) => service.downloadResource(args)
+    },
+    {
+      name: "download_course_materials",
+      description: "Explicitly queue filtered downloads for exactly one course; existing files are skipped by default.",
+      inputSchema: schema({
+        course: { type: "string", minLength: 1 },
+        section: { type: "string", minLength: 1 },
+        type: {
+          enum: ["resource", "folder"]
+        },
+        query: { type: "string" },
+        destination: { type: "string", minLength: 1 },
+        overwrite: { type: "boolean" },
+        skipExisting: { type: "boolean" },
+        limit: { type: "integer", minimum: 1, maximum: 500 }
+      }, ["course"]),
+      handler: (args) => service.downloadCourseMaterials(args)
+    }
+  ];
+}

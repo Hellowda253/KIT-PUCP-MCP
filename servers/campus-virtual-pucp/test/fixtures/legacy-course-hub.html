@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+  <body>
+    <form name="formresultado">
+      <input type="hidden" name="persona" value="20990001">
+      <input type="hidden" name="cicloAnoMatri" value="2026">
+      <input type="hidden" name="cicloMatri" value="01">
+      <input type="hidden" name="tipoCicloMatri" value="00">
+      <input type="hidden" name="session" value="never-cache-this">
+    </form>
+    <script>
+      function NotasParcialesAlumno(codigoAlumno,cicloano,ciclo,tipociclo) {
+        session = document.formresultado.session.value;
+        window.location="/pucp/notas/nownotpa/nownotpa;jsessionid=" + session +
+          "?accion=Ingresar&codigo=" + codigoAlumno + "&cicloano=" + cicloano +
+          "&ciclo=" + ciclo + "&tipociclo=" + tipociclo;
+      }
+      function HistoriaNotas(codigoAlumno) {
+        session = document.formresultado.session.value;
+        window.location="/pucp/notas/nowhisno/nowhisno;jsessionid=" + session +
+          "?accion=Ingresar&codigo=" + codigoAlumno;
+      }
+    </script>
+  </body>
+</html>

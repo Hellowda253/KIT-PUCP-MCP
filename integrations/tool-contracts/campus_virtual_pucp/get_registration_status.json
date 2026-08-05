@@ -1,0 +1,15 @@
+{
+  "name": "get_registration_status",
+  "description": "Read live registered or prematriculated courses, statuses, and personal relative positions from the active regular or structurally compatible extemporaneous view.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

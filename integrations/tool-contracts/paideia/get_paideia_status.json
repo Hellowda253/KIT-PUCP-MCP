@@ -1,0 +1,10 @@
+{
+  "name": "get_paideia_status",
+  "description": "Report local Paideia cache freshness and background job state without contacting PUCP.",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  }
+}

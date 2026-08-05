@@ -1,0 +1,20 @@
+{
+  "name": "list_campus_changes",
+  "description": "Return bounded summarized metadata changes per Campus module across recent syncs.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "module": {
+        "type": "string",
+        "minLength": 1
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

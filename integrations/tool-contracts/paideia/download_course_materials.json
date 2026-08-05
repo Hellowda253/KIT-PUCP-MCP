@@ -1,0 +1,45 @@
+{
+  "name": "download_course_materials",
+  "description": "Explicitly queue filtered downloads for exactly one course; existing files are skipped by default.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "course": {
+        "type": "string",
+        "minLength": 1
+      },
+      "section": {
+        "type": "string",
+        "minLength": 1
+      },
+      "type": {
+        "enum": [
+          "resource",
+          "folder"
+        ]
+      },
+      "query": {
+        "type": "string"
+      },
+      "destination": {
+        "type": "string",
+        "minLength": 1
+      },
+      "overwrite": {
+        "type": "boolean"
+      },
+      "skipExisting": {
+        "type": "boolean"
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500
+      }
+    },
+    "required": [
+      "course"
+    ],
+    "additionalProperties": false
+  }
+}

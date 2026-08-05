@@ -1,0 +1,15 @@
+{
+  "name": "get_enrollment_status",
+  "description": "Return cached read-only enrollment eligibility/status; never changes enrollment.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Contexto PUCP"
+  short_description: "Fuentes oficiales y orientación institucional PUCP"
+  default_prompt: "Usa $pucp-context para encontrar la fuente oficial adecuada para mi consulta PUCP."

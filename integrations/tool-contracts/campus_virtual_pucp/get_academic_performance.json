@@ -1,0 +1,24 @@
+{
+  "name": "get_academic_performance",
+  "description": "Return cached weighted average, CRAEst, merit order, and faculty population by term.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "term": {
+        "type": "string",
+        "minLength": 1
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}

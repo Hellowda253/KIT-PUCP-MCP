@@ -1,0 +1,17 @@
+{
+  "name": "download_campus_document",
+  "description": "Explicitly queue one cached Campus document download; routing uses cached sensitivity and cannot be overridden.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "document": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required": [
+      "document"
+    ],
+    "additionalProperties": false
+  }
+}

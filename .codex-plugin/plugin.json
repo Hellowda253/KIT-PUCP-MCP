@@ -1,0 +1,23 @@
+{
+  "name": "pucp-mcp",
+  "version": "0.1.0",
+  "description": "Consultas académicas de Paideia y Campus Virtual PUCP, con cambios de inscripción limitados por confirmación.",
+  "author": {
+    "name": "PUCP-MCP Community"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "PUCP-MCP",
+    "shortDescription": "Paideia, Campus Virtual y contexto PUCP",
+    "longDescription": "Consulta información académica personal, recomienda horarios y permite guardar únicamente cambios de inscripción previamente mostrados y confirmados; incluye fuentes oficiales y skills especializadas.",
+    "developerName": "PUCP-MCP Community",
+    "category": "Education",
+    "capabilities": [
+      "Read-mostly",
+      "Downloads",
+      "Confirmation-gated enrollment",
+      "Academic guidance"
+    ],
+    "defaultPrompt": "Consulta mi situación académica PUCP y ayúdame a priorizar lo importante."
+  }
+}

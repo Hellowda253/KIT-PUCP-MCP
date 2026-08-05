@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.local
+auth/
+data/
+downloads/
+coverage/
+tmp/
+output/
+.worktrees/
+worktrees/
+*.log
+*.backup
+*.bak

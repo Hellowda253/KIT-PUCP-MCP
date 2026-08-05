@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+  <body>
+    <h2>Vacantes que ofrecen otras unidades</h2>
+    <form name="formulario" method="post" action="/pucp/horarios/howvacdi/howvacdi">
+      <input type="hidden" name="accion" value="MostrarResultadosConsultaVacantesDifAlumno">
+      <input type="hidden" name="cicloano" value="2026">
+      <input type="hidden" name="ciclo" value="02">
+      <input type="hidden" name="tipociclo" value="00">
+      <input type="hidden" name="cmbUnidadAlumno" value="PRIVATE-UNIT-CODE">
+      <select name="cmbUnidad">
+        <option value="">Todas
+        <option value="12">Facultad de Ciencias e Ingeniería
+        <option value="14">Facultad de Ciencias Sociales
+      </select>
+
+      <table>
+        <tr><td>Unidad académica</td><td colspan="9">CIENCIAS E INGENIERÍA</td></tr>
+        <tr>
+          <th>Clave</th><th>Nombre del Curso</th><th>Cr.</th><th>Tipo Hor.</th>
+          <th>Hor.</th><th>Modalidad</th><th>Hor. Aso</th><th>Vac. Total</th>
+          <th>Vac. Unidad</th><th>Vacantes diferenciadas por unidad académica</th>
+        </tr>
+        <tr>
+          <td>MAT291</td><td>MATEMÁTICAS PARA ECONOMISTAS</td><td>4.0</td><td>CLASE</td>
+          <td>0501</td><td>PRESENCIAL</td><td>0502</td><td>40</td><td>5</td>
+          <td>CIENCIAS SOCIALES: 3<br>OTRAS UNIDADES: Vacantes no cubiertas por la unidad</td>
+        </tr>
+        <tr>
+          <td>1IND50</td><td>GESTIÓN DEL TALENTO HUMANO</td><td>3.0</td><td>PRÁCTICA</td>
+          <td>0831</td><td>SEMIPRESENCIAL</td><td></td><td>30</td><td></td>
+          <td>OTRAS UNIDADES: Vacantes no cubiertas por la unidad</td>
+        </tr>
+        <tr><td>Unidad académica</td><td colspan="9">CIENCIAS SOCIALES</td></tr>
+        <tr>
+          <th>Clave</th><th>Nombre del Curso</th><th>Cr.</th><th>Tipo Hor.</th>
+          <th>Hor.</th><th>Modalidad</th><th>Hor. Aso</th><th>Vac. Total</th>
+          <th>Vac. Unidad</th><th>Vacantes diferenciadas por unidad académica</th>
+        </tr>
+        <tr>
+          <td>ECO208</td><td>ECONOMÍA INTERNACIONAL 1</td><td>4.0</td><td>CLASE</td>
+          <td>0721</td><td>VIRTUAL</td><td></td><td>25</td><td>2</td>
+          <td>CIENCIAS E INGENIERÍA: 2</td>
+        </tr>
+      </table>
+    </form>
+  </body>
+</html>

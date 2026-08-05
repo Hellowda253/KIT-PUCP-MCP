@@ -1,0 +1,15 @@
+{
+  "name": "list_schedule_scopes",
+  "description": "List the faculties and specialties currently offered by the authenticated Inscríbete aquí portal.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "forceRefresh": {
+        "type": "boolean",
+        "description": "Queue a metadata-only refresh while returning the last good cache."
+      }
+    },
+    "required": [],
+    "additionalProperties": false
+  }
+}
