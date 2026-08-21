@@ -25,6 +25,7 @@ const expectedTools = [
   "get_registration_portal_status",
   "get_registration_status",
   "get_schedule_preferences",
+  "get_student_schedule",
   "evaluate_course_schedule",
   "list_campus_changes",
   "list_campus_modules",
@@ -71,6 +72,7 @@ const minimalArguments = {
   get_registration_portal_status: {},
   get_registration_status: {},
   get_schedule_preferences: {},
+  get_student_schedule: {},
   evaluate_course_schedule: {
     selections: [{ courseCode: "1IND50", scheduleId: "0831" }]
   },
@@ -146,6 +148,7 @@ test("Campus MCP advertises complete schemas and dispatches all required public 
     getRegistrationPortalStatus: "get_registration_portal_status",
     getRegistrationStatus: "get_registration_status",
     getSchedulePreferences: "get_schedule_preferences",
+    getStudentSchedule: "get_student_schedule",
     evaluateCourseSchedule: "evaluate_course_schedule",
     listCampusChanges: "list_campus_changes",
     listCampusModules: "list_campus_modules",

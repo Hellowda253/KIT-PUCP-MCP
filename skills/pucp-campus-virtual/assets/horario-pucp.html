@@ -262,7 +262,7 @@
       flex-direction: column;
       justify-content: space-between;
       min-height: 0;
-      padding: 4px 6px;
+      padding: 3px 5px;
     }
 
     .event-code,
@@ -273,8 +273,8 @@
     }
 
     .event-code { font-size: 0.63rem; font-weight: 750; white-space: nowrap; }
-    .event-title { font-size: 0.68rem; font-weight: 750; line-height: 1.2; }
-    .event-details { margin-top: 2px; font-size: 0.61rem; font-weight: 650; }
+    .event-title { font-size: 0.65rem; font-weight: 700; line-height: 1.16; }
+    .event-details { margin-top: 2px; font-size: 0.58rem; font-weight: 650; line-height: 1.16; }
 
     .type-class { color: var(--class-text); background: var(--class-bg); border-color: var(--class-border); }
     .type-class .event-top { background: var(--class-header); }
@@ -300,6 +300,7 @@
       .event-box.event-expanded {
         left: 3px !important;
         width: calc(100% - 6px) !important;
+        overflow: visible;
         z-index: 20;
       }
 
@@ -506,8 +507,9 @@
         return session.type === "exam" ? `${codes} — EXAMEN` : `${codes} — H${session.scheduleId ?? ""}`;
       }
 
-      function sessionDetails(session) {
-        return [session.room, session.instructor].filter(Boolean).join(" • ");
+      function sessionDetails(session, readable = true) {
+        const instructor = readable ? (session.displayInstructor || session.instructor) : session.instructor;
+        return [session.room, instructor].filter(Boolean).join(" • ");
       }
 
       function sessionsOverlap(left, right) {
@@ -518,6 +520,10 @@
       function clearEventFocus(dayColumn) {
         dayColumn.querySelectorAll(".event-box").forEach((event) => {
           event.classList.remove("event-expanded", "event-obscured");
+          if (event.dataset.baseHeight) {
+            event.style.height = event.dataset.baseHeight;
+            delete event.dataset.baseHeight;
+          }
         });
       }
 
@@ -525,7 +531,10 @@
         const dayColumn = event.closest(".day-col");
         if (!dayColumn) return;
         clearEventFocus(dayColumn);
+        event.dataset.baseHeight = event.style.height;
         event.classList.add("event-expanded");
+        const baseHeight = event.getBoundingClientRect().height;
+        event.style.height = `${Math.max(baseHeight, event.scrollHeight + 2)}px`;
         dayColumn.querySelectorAll(".event-box").forEach((peer) => {
           if (peer !== event && sessionsOverlap(event, peer)) {
             peer.classList.add("event-obscured");
@@ -620,10 +629,11 @@
             const content = element("div", "event-content");
             const heading = element("div");
             heading.append(element("div", "event-code", sessionLabel(session)));
-            heading.append(element("div", "event-title", session.title || ""));
+            heading.append(element("div", "event-title", session.displayTitle || session.title || ""));
             content.append(heading);
             content.append(element("div", "event-details", sessionDetails(session)));
             event.append(content);
+            event.title = [session.title, sessionDetails(session, false)].filter(Boolean).join(" · ");
             event.addEventListener("pointerenter", () => activateEventFocus(event));
             event.addEventListener("pointerleave", () => {
               if (document.activeElement !== event) clearEventFocus(dayColumn);
@@ -654,7 +664,7 @@
               const item = element("article", `mobile-event type-${session.type}`);
               item.append(element("div", "mobile-event-time", `${session.start} – ${session.end}`));
               const detail = element("div");
-              detail.append(element("div", "mobile-event-title", `${sessionLabel(session)} · ${session.title || ""}`));
+              detail.append(element("div", "mobile-event-title", `${sessionLabel(session)} · ${session.displayTitle || session.title || ""}`));
               detail.append(element("div", "mobile-event-details", [TYPE_LABELS[session.type], sessionDetails(session), session.weeksLabel].filter(Boolean).join(" · ")));
               item.append(detail);
               day.append(item);
@@ -684,7 +694,8 @@
         }
         courses.forEach((course) => {
           const row = element("tr");
-          [course.code, course.name, Number(course.credits || 0).toFixed(1), course.scheduleId, course.instructor, course.classes]
+          [course.code, course.displayName || course.name, Number(course.credits || 0).toFixed(1), course.scheduleId,
+            course.displayInstructor || course.instructor, course.classes]
             .forEach((value) => addCell(row, value));
           addCell(row, course.practice, "lab");
           addCell(row, course.exams, "exam");

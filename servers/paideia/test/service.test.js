@@ -123,6 +123,69 @@ test("stale query returns last good cache while starting one background refresh"
   assert.equal((await service.getJobStatus({ jobId: first.data.refreshJobId })).data.status, "completed");
 });
 
+test("force refresh selects only the Paideia components needed by each query", async () => {
+  const calls = [];
+  const { service } = await setup({
+    adapter: {
+      async sync(input) {
+        calls.push(input);
+        return { ...snapshot, generatedAt: now, retrievedAt: now };
+      }
+    }
+  });
+
+  await service.searchMaterials({ forceRefresh: true, query: "datos" });
+  await service.waitForIdle();
+  await service.listCourseGrades({ forceRefresh: true, course: "1" });
+  await service.waitForIdle();
+  await service.listCourses({ forceRefresh: true });
+  await service.waitForIdle();
+
+  assert.deepEqual(calls.map(({ components }) => components), [
+    ["catalog", "course_content"],
+    ["catalog", "grades"],
+    ["catalog"]
+  ]);
+});
+
+test("component refresh preserves unrelated Paideia cache slices", async () => {
+  const refreshedMaterial = {
+    ...snapshot.materials[0],
+    id: "m3",
+    title: "Material actualizado"
+  };
+  const { service, cachePath } = await setup({
+    adapter: {
+      async sync() {
+        return {
+          generatedAt: now,
+          retrievedAt: now,
+          areaStates: snapshot.areaStates,
+          courses: snapshot.courses.map((course) => ({ ...course, sections: [] })),
+          activities: snapshot.activities,
+          pendingItems: snapshot.pendingItems,
+          materials: [refreshedMaterial],
+          failedCourseIds: [],
+          coverage: {
+            components: ["catalog", "course_content"],
+            allCourses: true
+          }
+        };
+      }
+    }
+  });
+
+  await service.searchMaterials({ forceRefresh: true });
+  await service.waitForIdle();
+  const updated = JSON.parse(await readFile(cachePath, "utf8"));
+
+  assert.deepEqual(updated.materials.map(({ id }) => id), ["m3"]);
+  assert.deepEqual(updated.announcements, snapshot.announcements);
+  assert.deepEqual(updated.grades, snapshot.grades);
+  assert.equal(updated.componentGeneratedAt.course_content, now);
+  assert.equal(updated.componentGeneratedAt.grades, generatedAt);
+});
+
 test("sync and download operations return jobs immediately and authentication errors stay structured", async () => {
   const { service } = await setup({
     adapter: {
@@ -213,6 +276,28 @@ test("background job errors expose normalized lowercase public codes", async () 
   await service.waitForIdle();
   const failed = await service.getJobStatus({ jobId: queued.data.jobId });
   assert.equal(failed.data.error.code, "path_not_allowed");
+});
+
+test("Paideia timeout diagnostics expose a safe category and stage without secrets", async () => {
+  const { service } = await setup({
+    adapter: {
+      async sync() {
+        const error = new Error("Timeout at https://paideia.invalid/?token=secret password=hunter2");
+        error.name = "TimeoutError";
+        error.stage = "course_content.navigation";
+        throw error;
+      }
+    }
+  });
+
+  const queued = await service.syncPaideia({});
+  await service.waitForIdle();
+  const failed = await service.getJobStatus({ jobId: queued.data.jobId });
+
+  assert.equal(failed.data.error.code, "timeout");
+  assert.equal(failed.data.error.stage, "course_content.navigation");
+  assert.equal(failed.data.error.retryable, true);
+  assert.doesNotMatch(JSON.stringify(failed.data.error), /secret|hunter2|https:\/\//i);
 });
 
 test("material changes summarize sync history without losing the last good snapshot", async () => {
@@ -315,20 +400,26 @@ test("download classification, safe course mapping, and manifest deduplication c
   }
 
   const root = "C:\\Users\\student\\OneDrive\\.UNI V2";
-  assert.equal(courseDestination("SIMULACIÓN", root), path.join(root, "SIMULACION", "PAIDEIA NUEVO"));
-  assert.equal(courseDestination("Curso ambiguo", root), path.join(root, "Curso ambiguo", "PAIDEIA NUEVO"));
+  assert.equal(courseDestination("SIMULACIÓN", root), path.join(root, "SIMULACION"));
+  assert.equal(courseDestination("Curso ambiguo", root), path.join(root, "Curso ambiguo"));
   assert.equal(
-    materialDestination("SIMULACIÓN", "Semana 1", path.join(root, "SIMULACION", "PAIDEIA NUEVO")),
-    path.join(root, "SIMULACION", "PAIDEIA NUEVO", "Semana 1")
+    materialDestination("SIMULACIÓN", "Semana 1", path.join(root, "SIMULACION")),
+    path.join(root, "SIMULACION", "Semana 1")
   );
   assert.equal(
-    materialDestination("FUNDAMENTOS DE LA CADENA DE SUMINISTROS", "S06b - Inventarios", path.join(root, "FUNDAMENTOS DE LA CADENA DE SUMINISTROS", "CLASES")),
-    path.join(root, "FUNDAMENTOS DE LA CADENA DE SUMINISTROS", "CLASES", "S07")
+    materialDestination("FUNDAMENTOS DE LA CADENA DE SUMINISTROS", "S06b - Inventarios", path.join(root, "FUNDAMENTOS DE LA CADENA DE SUMINISTROS")),
+    path.join(root, "FUNDAMENTOS DE LA CADENA DE SUMINISTROS", "S06b - Inventarios")
   );
-  assert.throws(() => courseDestination("Curso", "C:\\Users\\student\\OneDrive\\UNI"), /safe/i);
+  assert.equal(
+    courseDestination("Curso", "C:\\Users\\student\\OneDrive\\UNI"),
+    path.join("C:\\Users\\student\\OneDrive\\UNI", "Curso")
+  );
+  assert.doesNotThrow(() =>
+    validateDownloadDestination(path.join(root, "Curso", "SILABOS MD"), root)
+  );
   assert.throws(
-    () => validateDownloadDestination(path.join(root, "Curso", "SILABOS MD"), root),
-    /SILABOS MD/i
+    () => validateDownloadDestination(path.resolve(root, "..", "escape"), root),
+    /outside/i
   );
 
   const manifest = createDownloadManifest({

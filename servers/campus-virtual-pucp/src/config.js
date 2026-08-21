@@ -31,13 +31,13 @@ export function defaultCampusPaths(env = process.env) {
     schedulePath: path.join(dataRoot, "course-schedules.json"),
     preferencesPath: path.join(dataRoot, "schedule-preferences.local.json"),
     uniRoot: path.resolve(
-      env.CAMPUS_PUCP_UNI_ROOT ||
+        env.CAMPUS_PUCP_UNI_ROOT ||
         env.PUCP_DOWNLOADS_DIR ||
-        path.join(repositoryRoot, "downloads", ".UNI V2")
+        path.join(repositoryRoot, "downloads", "Campus")
     ),
     privateRoot: path.resolve(
       env.CAMPUS_PUCP_PRIVATE_ROOT ||
-        path.join(repositoryRoot, "downloads", "PUCP Privado")
+        path.join(repositoryRoot, "downloads", "Privado")
     )
   };
 }

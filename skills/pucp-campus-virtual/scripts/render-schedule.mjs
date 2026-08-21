@@ -3,6 +3,7 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { prepareScheduleDisplayData } from "./schedule-display.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TEMPLATE = path.resolve(SCRIPT_DIR, "../assets/horario-pucp.html");
@@ -19,12 +20,12 @@ function normalizeData(data) {
   if (!Number.isFinite(credits) || credits < 0) {
     throw new TypeError("Schedule credits must be a non-negative number");
   }
-  return {
+  return prepareScheduleDisplayData({
     term: String(data.term ?? ""),
     credits,
     courses: data.courses,
     sessions: data.sessions
-  };
+  });
 }
 
 function serializeForHtml(data) {

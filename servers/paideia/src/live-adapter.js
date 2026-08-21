@@ -105,8 +105,11 @@ export async function waitForPaideiaLanding(
 
 export function createLivePaideiaAdapter({
   configLoader = loadPaideiaConfig,
-  playwrightLoader = () => import("playwright")
+  playwrightLoader = () => import("playwright"),
+  epochNow = () => Date.now(),
+  continuingCooldownMs = 30 * 60 * 1000
 } = {}) {
+  const areaCooldowns = new Map();
   async function withSession(task, { acceptDownloads = false } = {}) {
     const config = await configLoader();
     if (!config.user || !config.pass) {
@@ -272,62 +275,126 @@ export function createLivePaideiaAdapter({
   }
 
   async function sync(options = {}) {
+    const syncStarted = Date.now();
     return withSession(async ({ context, page, config, policy }) => {
       const retrievedAt = new Date().toISOString();
+      const requested = new Set(options.components ?? [
+        "catalog",
+        "course_content",
+        "activity_details",
+        "announcements",
+        "grades"
+      ]);
+      requested.add("catalog");
+      if (requested.has("activity_details") || requested.has("announcements")) {
+        requested.add("course_content");
+      }
+      const componentOrder = [
+        "catalog",
+        "course_content",
+        "activity_details",
+        "announcements",
+        "grades"
+      ];
+      const components = componentOrder.filter((component) => requested.has(component));
+      const timings = {};
+      const failures = [];
+      const stage = async (name, operation) => {
+        const started = Date.now();
+        try {
+          return await operation();
+        } finally {
+          timings[`${name}Ms`] = Date.now() - started;
+        }
+      };
       const primaryDashboardHtml = await page.content();
       const areas = paideiaAreaDefinitions(config);
-      const { courses, areaStates } = await collectPaideiaAreaCourses(
-        areas,
-        async (area) => {
-          if (area.required) return primaryDashboardHtml;
-          const areaPage = await context.newPage();
-          try {
-            await openAuthenticatedDashboard(
-              areaPage,
-              `${area.baseUrl}/my/courses.php`,
-              config,
-              policy
-            );
-            return await areaPage.content();
-          } finally {
-            await areaPage.close().catch(() => {});
+      const collected = await stage("catalog", () =>
+        collectPaideiaAreaCourses(
+          areas,
+          async (area) => {
+            if (area.required) return primaryDashboardHtml;
+            const cooldownUntil = areaCooldowns.get(area.id) ?? 0;
+            if (
+              options.retryUnavailableAreas !== true &&
+              cooldownUntil > epochNow()
+            ) {
+              throw paideiaError(
+                "area_cooldown",
+                "Optional Paideia area is temporarily in cooldown"
+              );
+            }
+            const areaPage = await context.newPage();
+            try {
+              await openAuthenticatedDashboard(
+                areaPage,
+                `${area.baseUrl}/my/courses.php`,
+                config,
+                policy
+              );
+              areaCooldowns.delete(area.id);
+              return await areaPage.content();
+            } catch (error) {
+              areaCooldowns.set(area.id, epochNow() + continuingCooldownMs);
+              throw error;
+            } finally {
+              await areaPage.close().catch(() => {});
+            }
           }
-        }
+        )
       );
+      const courses = collected.courses;
+      const areaStates = collected.areaStates.map((entry) => {
+        const cooldownUntil = areaCooldowns.get(entry.area) ?? 0;
+        return entry.state === "unavailable" && cooldownUntil > epochNow()
+          ? {
+              ...entry,
+              reason: "cooldown",
+              retryAfter: new Date(cooldownUntil).toISOString()
+            }
+          : entry;
+      });
       const courseConcurrency = Math.min(
         Math.max(Number(options.courseConcurrency || 4), 1),
         6
       );
-      const courseResults = await mapLimit(
-        courses,
-        courseConcurrency,
-        async (course) => {
-          const coursePage = await context.newPage();
-          try {
-            await safeGoto(coursePage, course.url, policy, {
-              waitUntil: "domcontentloaded",
-              timeout: 45_000
-            });
-            const html = await coursePage.content();
-            const parsed = parseCourseHtml(
-              html,
-              course,
-              new URL(course.url).origin
-            );
-            if (!isPlausibleCoursePage(html, parsed)) {
-              throw paideiaError(
-                "scrape_failed",
-                "Paideia course page was structurally implausible"
-              );
+      const courseResults = requested.has("course_content")
+        ? await stage("courseContent", () => mapLimit(
+            courses,
+            courseConcurrency,
+            async (course) => {
+              const coursePage = await context.newPage();
+              try {
+                await safeGoto(coursePage, course.url, policy, {
+                  waitUntil: "domcontentloaded",
+                  timeout: 45_000
+                });
+                const html = await coursePage.content();
+                const parsed = parseCourseHtml(
+                  html,
+                  course,
+                  new URL(course.url).origin
+                );
+                if (!isPlausibleCoursePage(html, parsed)) {
+                  throw paideiaError(
+                    "scrape_failed",
+                    "Paideia course page was structurally implausible"
+                  );
+                }
+                return { course, parsed, failed: false };
+              } catch (error) {
+                failures.push({
+                  stage: "course_content",
+                  courseId: course.id,
+                  code: typeof error?.code === "string" ? error.code : "operation_failed"
+                });
+                return { course, parsed: null, failed: true };
+              } finally {
+                await coursePage.close().catch(() => {});
+              }
             }
-            return { course, parsed, failed: false };
-          } catch {
-            return { course, parsed: null, failed: true };
-          } finally {
-            await coursePage.close().catch(() => {});
-          }
-        }
-      );
+          ))
+        : courses.map((course) => ({ course, parsed: null, failed: false }));
 
       const parsedCourses = courseResults.map(({ parsed }) => parsed ?? {
         sections: [],
@@ -346,83 +413,115 @@ export function createLivePaideiaAdapter({
         sections: parsedCourses[index].sections
       }));
       const activityDetails = {};
-      await mapLimit(
-        pendingItems,
-        Math.min(Math.max(Number(options.detailConcurrency || 5), 1), 8),
-        async (activity) => {
-          const detailPage = await context.newPage();
-          try {
-            await safeGoto(detailPage, activity.url, policy, {
-              waitUntil: "domcontentloaded",
-              timeout: 30_000
-            });
-            // Only the assignment/quiz overview URL is loaded. No attempt,
-            // submission editor, or answer link is clicked.
-            activityDetails[activity.id] = parseActivityDetailHtml(
-              await detailPage.content(),
-              activity
-            );
-          } catch {
-            activityDetails[activity.id] = {
-              id: activity.id,
-              state: "unavailable"
-            };
-          } finally {
-            await detailPage.close().catch(() => {});
+      if (requested.has("activity_details")) {
+        await stage("activityDetails", () => mapLimit(
+          pendingItems,
+          Math.min(Math.max(Number(options.detailConcurrency || 5), 1), 8),
+          async (activity) => {
+            const detailPage = await context.newPage();
+            try {
+              await safeGoto(detailPage, activity.url, policy, {
+                waitUntil: "domcontentloaded",
+                timeout: 30_000
+              });
+              // Only the assignment/quiz overview URL is loaded. No attempt,
+              // submission editor, or answer link is clicked.
+              activityDetails[activity.id] = parseActivityDetailHtml(
+                await detailPage.content(),
+                activity
+              );
+            } catch (error) {
+              failures.push({
+                stage: "activity_details",
+                courseId: activity.courseId,
+                activityId: activity.id,
+                code: typeof error?.code === "string" ? error.code : "operation_failed"
+              });
+              activityDetails[activity.id] = {
+                id: activity.id,
+                state: "unavailable"
+              };
+            } finally {
+              await detailPage.close().catch(() => {});
+            }
           }
-        }
-      );
+        ));
+      }
 
       const announcements = {};
       const grades = {};
-      await mapLimit(normalizedCourses, Math.min(courseConcurrency, 4), async (course) => {
-        const courseActivities = activities.filter((item) => item.courseId === course.id);
-        const announcementForum = courseActivities.find((item) =>
-          item.type === "forum" &&
-          /\b(?:avisos?|anuncios?|novedades|noticias|news|announcements?)\b/i.test(
-            searchableText(item.title)
-          )
-        );
-        if (announcementForum) {
-          const forumPage = await context.newPage();
-          try {
-            await safeGoto(forumPage, announcementForum.url, policy, {
-              waitUntil: "domcontentloaded",
-              timeout: 30_000
-            });
-            announcements[course.id] = {
-              state: "available",
-              items: parseAnnouncementsHtml(
-                await forumPage.content(),
-                course,
-                new URL(course.url).origin
+      if (requested.has("announcements")) {
+        await stage("announcements", () => mapLimit(
+          normalizedCourses,
+          Math.min(courseConcurrency, 4),
+          async (course) => {
+            const courseActivities = activities.filter((item) => item.courseId === course.id);
+            const announcementForum = courseActivities.find((item) =>
+              item.type === "forum" &&
+              /\b(?:avisos?|anuncios?|novedades|noticias|news|announcements?)\b/i.test(
+                searchableText(item.title)
               )
-            };
-          } catch {
-            announcements[course.id] = { state: "unavailable", items: [] };
-          } finally {
-            await forumPage.close().catch(() => {});
+            );
+            if (!announcementForum) {
+              announcements[course.id] = { state: "unavailable", items: [] };
+              return;
+            }
+            const forumPage = await context.newPage();
+            try {
+              await safeGoto(forumPage, announcementForum.url, policy, {
+                waitUntil: "domcontentloaded",
+                timeout: 30_000
+              });
+              announcements[course.id] = {
+                state: "available",
+                items: parseAnnouncementsHtml(
+                  await forumPage.content(),
+                  course,
+                  new URL(course.url).origin
+                )
+              };
+            } catch (error) {
+              failures.push({
+                stage: "announcements",
+                courseId: course.id,
+                code: typeof error?.code === "string" ? error.code : "operation_failed"
+              });
+              announcements[course.id] = { state: "unavailable", items: [] };
+            } finally {
+              await forumPage.close().catch(() => {});
+            }
           }
-        } else {
-          announcements[course.id] = { state: "unavailable", items: [] };
-        }
+        ));
+      }
+      if (requested.has("grades")) {
+        await stage("grades", () => mapLimit(
+          normalizedCourses,
+          Math.min(courseConcurrency, 4),
+          async (course) => {
+            const gradePage = await context.newPage();
+            try {
+              await safeGoto(
+                gradePage,
+                `${new URL(course.url).origin}/grade/report/user/index.php?id=${encodeURIComponent(course.sourceId ?? course.id)}`,
+                policy,
+                { waitUntil: "domcontentloaded", timeout: 30_000 }
+              );
+              grades[course.id] = parseGradesHtml(await gradePage.content(), course);
+            } catch (error) {
+              failures.push({
+                stage: "grades",
+                courseId: course.id,
+                code: typeof error?.code === "string" ? error.code : "operation_failed"
+              });
+              grades[course.id] = { state: "unavailable", items: [] };
+            } finally {
+              await gradePage.close().catch(() => {});
+            }
+          }
+        ));
+      }
 
-        const gradePage = await context.newPage();
-        try {
-          await safeGoto(
-            gradePage,
-            `${new URL(course.url).origin}/grade/report/user/index.php?id=${encodeURIComponent(course.sourceId ?? course.id)}`,
-            policy,
-            { waitUntil: "domcontentloaded", timeout: 30_000 }
-          );
-          grades[course.id] = parseGradesHtml(await gradePage.content(), course);
-        } catch {
-          grades[course.id] = { state: "unavailable", items: [] };
-        } finally {
-          await gradePage.close().catch(() => {});
-        }
-      });
-
+      timings.totalMs = Date.now() - syncStarted;
       return {
         generatedAt: new Date().toISOString(),
         retrievedAt,
@@ -434,7 +533,10 @@ export function createLivePaideiaAdapter({
         announcements,
         grades,
         failedCourseIds,
-        areaStates
+        areaStates,
+        coverage: { components, allCourses: true },
+        timings,
+        failures
       };
     });
   }
@@ -473,8 +575,30 @@ export function createLivePaideiaAdapter({
     persist,
     policy
   ) {
-    if (manifest.has({ sourceUrl: link.url })) {
-      return { status: "skipped", reason: "source_url_seen", sourceUrl: link.url };
+    const liveManifestEntry = async (candidate) => {
+      for (;;) {
+        const entry = manifest.find(candidate);
+        if (!entry) return null;
+        try {
+          const storedPath = await resolveSafeWritePath(entry.path, options.uniRoot);
+          const stored = await stat(storedPath);
+          if (!stored.isFile()) throw new Error("manifest target is not a file");
+          return { ...entry, path: storedPath, size: stored.size };
+        } catch {
+          manifest.remove(entry);
+          await persist();
+        }
+      }
+    };
+    const sourceEntry = await liveManifestEntry({ sourceUrl: link.url });
+    if (sourceEntry) {
+      return {
+        status: "skipped",
+        reason: "source_url_seen",
+        sourceUrl: link.url,
+        path: sourceEntry.path,
+        size: sourceEntry.size
+      };
     }
     const response = await requestWithPolicy(context, link.url, policy);
     try {
@@ -514,7 +638,7 @@ export function createLivePaideiaAdapter({
       }
     const sha256 = createHash("sha256").update(buffer).digest("hex");
     const candidate = { sourceUrl: link.url, size: buffer.length, sha256 };
-    if (manifest.has(candidate)) {
+    if (await liveManifestEntry(candidate)) {
       return { status: "skipped", reason: "duplicate_content", ...candidate };
     }
     const name = fileNameFromHeaders(
@@ -538,6 +662,7 @@ export function createLivePaideiaAdapter({
         sourceUrl: link.url
       };
     }
+    await mkdir(path.dirname(resolvedTarget), { recursive: true });
     await writeFile(resolvedTarget, buffer, {
       flag: options.overwrite ? "w" : "wx"
     });
@@ -573,7 +698,6 @@ export function createLivePaideiaAdapter({
       materialDestination(resource.course, resource.section, destination),
       options.uniRoot
     );
-    await mkdir(targetDestination, { recursive: true });
     const direct = await downloadResponse(
       context,
       { url: resource.url, title: resource.title },

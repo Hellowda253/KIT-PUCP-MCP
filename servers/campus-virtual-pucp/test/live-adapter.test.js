@@ -398,6 +398,10 @@ test("legacy course hub fans out to partial grades, history, and current enrolle
       <tr><th>Clave</th><th>Nombre del curso</th><th>Tipo</th><th>Créditos</th><th>Vez</th><th>Nota</th><th>Ciclo</th><th>Equivalencia</th><th>Observación</th></tr>
       <tr><td>1IND59</td><td>SIMULACIÓN</td><td>OBL</td><td>3.5</td><td>1</td><td>15</td><td>2026-1</td><td></td><td></td></tr>
     </table>`;
+  const studentSchedule = await readFile(
+    new URL("./fixtures/legacy-student-schedule.html", import.meta.url),
+    "utf8"
+  );
   const session = {
     async authenticate() {},
     async goto(url) {
@@ -412,6 +416,7 @@ test("legacy course hub fans out to partial grades, history, and current enrolle
       if (url === courseHubUrl) return { url, html: courseHub };
       if (url.includes("/nownotpa/")) return { url, html: partialGrades };
       if (url.includes("/nowhisno/")) return { url, html: history };
+      if (url.includes("/howhorac/")) return { url, html: studentSchedule };
       if (url.includes("accion=AbrirPanel")) return { url, html: personalPanel };
       if (url.includes("/cawdocpg/")) return { url, html: financial };
       if (url.includes("/cawoblig/")) return { url, html: obligations };
@@ -475,6 +480,9 @@ test("legacy course hub fans out to partial grades, history, and current enrolle
   assert.equal(result.modules.requests.items[0].id, "REQ-1");
   assert.equal(result.modules.documents.items[0].title, "Grupos TA");
   assert.equal(result.modules.documents.items[0].downloadable, true);
+  assert.equal(result.modules.student_schedule.state, "available");
+  assert.equal(result.modules.student_schedule.source, "student_schedule_page");
+  assert.equal(result.modules.student_schedule.items[0].room, "A303");
   assert.deepEqual(result.modules.enrolled_courses.items, [{
     code: "1IND59",
     name: "SIMULACIÓN",
@@ -722,6 +730,127 @@ test("registration adapter reads Inscríbete aquí as the primary current schedu
   assert.equal(result.differences[0].field, "vacancies");
   assert.equal(calls.some(([kind]) => kind === "workspace"), true);
   assert.equal(calls.filter(([kind]) => kind === "authenticate").length, 2);
+});
+
+test("current schedule search falls back to the shared catalog when registration is closed", async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "campus-registration-closed-"));
+  const calls = [];
+  const session = {
+    async authenticate() { calls.push("authenticate"); },
+    async queryRegistrationWorkspace() {
+      calls.push("registration");
+      const error = new Error("Registration portal is no longer visible");
+      error.code = "registration_portal_not_visible";
+      throw error;
+    },
+    async queryCourseSchedules(options) {
+      calls.push(["catalog", options.term, options.academicScope ?? null]);
+      return {
+        url: "https://eros.pucp.edu.pe/pucp/horarios/howcurho/howcurho",
+        html: `<table><tr><th>Clave</th><th>Nombre del curso</th><th>Cr.</th><th>Tipo Hor.</th><th>Hor.</th><th>Vac.</th><th>Vac.Unid</th><th>Ins.</th><th>Mat.</th><th>Profesor</th><th>Sesiones</th></tr><tr><td>ECO253</td><td>ECONOMÍA</td><td>3</td><td>Cla</td><td>0531</td><td>29</td><td>30</td><td>12</td><td>0</td><td>DOCENTE</td><td>LUN 08:00-10:00 C</td></tr></table>`
+      };
+    },
+    async close() {}
+  };
+  const adapter = createLiveCampusAdapter({
+    loadConfig: async () => config(temporary),
+    createSession: async () => session,
+    now: () => "2026-08-21T12:00:00.000Z"
+  });
+
+  const result = await adapter.searchCurrentCourseSchedules({
+    term: "2026-2",
+    courseCodes: ["ECO253"],
+    metadataOnly: true,
+    allowDownloads: false,
+    allowMutations: false,
+    useCampusGenerator: false
+  });
+
+  assert.equal(result.state, "available");
+  assert.equal(result.source, "schedule_catalog");
+  assert.deepEqual(result.sourcesUsed, ["schedule_catalog"]);
+  assert.equal(result.activeTerm, "2026-2");
+  assert.equal(result.items[0].courseCode, "ECO253");
+  assert.match(result.warnings[0], /differ/i);
+  assert.deepEqual(calls.slice(0, 2), ["authenticate", "registration"]);
+  assert.equal(calls.some((entry) => Array.isArray(entry) && entry[0] === "catalog"), true);
+});
+
+test("current schedule search goes directly to the catalog when registration is known to be closed", async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "campus-registration-skipped-"));
+  const calls = [];
+  const session = {
+    async authenticate() {
+      calls.push("authenticate");
+      throw new Error("registration authentication must be skipped");
+    },
+    async queryRegistrationWorkspace() {
+      calls.push("registration");
+      throw new Error("registration workspace must be skipped");
+    },
+    async queryCourseSchedules() {
+      calls.push("catalog");
+      return {
+        url: "https://eros.pucp.edu.pe/pucp/horarios/howcurho/howcurho",
+        html: `<table><tr><th>Clave</th><th>Nombre del curso</th><th>Cr.</th><th>Tipo Hor.</th><th>Hor.</th><th>Vac.</th><th>Vac.Unid</th><th>Ins.</th><th>Mat.</th><th>Profesor</th><th>Sesiones</th></tr><tr><td>ECO253</td><td>ECONOMÍA</td><td>3</td><td>Cla</td><td>0531</td><td>29</td><td>30</td><td>12</td><td>0</td><td>DOCENTE</td><td>LUN 08:00-10:00 C</td></tr></table>`
+      };
+    },
+    async close() {}
+  };
+  const adapter = createLiveCampusAdapter({
+    loadConfig: async () => config(temporary),
+    createSession: async () => session,
+    now: () => "2026-08-21T12:00:00-05:00"
+  });
+
+  const result = await adapter.searchCurrentCourseSchedules({
+    term: "2026-2",
+    courseCodes: ["ECO253"],
+    preferRegistrationPortal: false,
+    metadataOnly: true,
+    allowDownloads: false,
+    allowMutations: false,
+    useCampusGenerator: false
+  });
+
+  assert.equal(result.source, "schedule_catalog");
+  assert.deepEqual(result.sourcesUsed, ["schedule_catalog"]);
+  assert.deepEqual(calls, ["catalog"]);
+  assert.match(result.warnings[0], /differ/i);
+});
+
+test("academic-scope current search uses the catalog after registration closes", async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "campus-registration-scope-"));
+  const session = {
+    async authenticate() {},
+    async queryRegistrationWorkspace() {
+      const error = new Error("Registration portal is not visible");
+      error.code = "registration_portal_not_visible";
+      throw error;
+    },
+    async queryCourseSchedules(options) {
+      assert.equal(options.academicScope.academicUnit, "CIENCIAS SOCIALES");
+      return {
+        url: "https://eros.pucp.edu.pe/pucp/horarios/howcurho/howcurho",
+        html: `<table><tr><th>Clave</th><th>Nombre del curso</th><th>Cr.</th><th>Tipo Hor.</th><th>Hor.</th><th>Vac.</th><th>Vac.Unid</th><th>Ins.</th><th>Mat.</th><th>Profesor</th><th>Sesiones</th></tr><tr><td>ECO253</td><td>ECONOMÍA</td><td>3</td><td>Cla</td><td>0531</td><td>29</td><td>30</td><td>12</td><td>0</td><td>DOCENTE</td><td>LUN 08:00-10:00 C</td></tr></table>`
+      };
+    },
+    async close() {}
+  };
+  const adapter = createLiveCampusAdapter({
+    loadConfig: async () => config(temporary),
+    createSession: async () => session
+  });
+  const result = await adapter.searchCurrentCourseSchedules({
+    term: "2026-2",
+    academicScope: { academicUnit: "CIENCIAS SOCIALES" },
+    metadataOnly: true,
+    allowDownloads: false,
+    allowMutations: false,
+    useCampusGenerator: false
+  });
+  assert.equal(result.items[0].courseCode, "ECO253");
 });
 
 test("confirmed registration adapter sends only prepared opaque references", async () => {

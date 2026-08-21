@@ -12,6 +12,7 @@ import {
   parseLegacyGradeStatisticsHtml,
   parseLegacyHistoryHtml,
   parseLegacyPartialGradesHtml,
+  parseLegacyStudentScheduleHtml,
   parseModuleHtml,
   parsePortalModules
 } from "./parsers.js";
@@ -63,6 +64,7 @@ export async function prepareScheduleScopeCatalog({
 
 const MODULE_KEYS = [
   "agenda",
+  "student_schedule",
   "enrolled_courses",
   "official_grades",
   "academic_history",
@@ -823,17 +825,27 @@ async function createPlaywrightSession({ config, policy }) {
     if (reload || !/pmwmatrc|intranet\.jsp/i.test(page.url())) {
       await page.goto(entryUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
     }
-    await page.waitForFunction(
-      () => [...document.querySelectorAll("iframe")].some((frame) => {
-        try {
-          return /inscripci.n registrada|matr.cula extempor.nea/i.test(frame.contentDocument?.body?.innerText ?? "");
-        } catch {
-          return false;
-        }
-      }) || /inscripci.n registrada|matr.cula extempor.nea/i.test(document.body?.innerText ?? ""),
-      undefined,
-      { timeout: 45_000 }
-    );
+    try {
+      await page.waitForFunction(
+        () => [...document.querySelectorAll("iframe")].some((frame) => {
+          try {
+            return /inscripci.n registrada|matr.cula extempor.nea/i.test(frame.contentDocument?.body?.innerText ?? "");
+          } catch {
+            return false;
+          }
+        }) || /inscripci.n registrada|matr.cula extempor.nea/i.test(document.body?.innerText ?? ""),
+        undefined,
+        { timeout: 45_000 }
+      );
+    } catch (cause) {
+      if (cause?.name !== "TimeoutError") throw cause;
+      const error = adapterError(
+        "registration_portal_not_visible",
+        "The Campus registration view is not currently visible"
+      );
+      error.stage = "registration_portal.discovery";
+      throw error;
+    }
     const candidates = [
       page.mainFrame(),
       ...page.frames().filter((frame) => frame !== page.mainFrame())
@@ -845,7 +857,10 @@ async function createPlaywrightSession({ config, policy }) {
         return frame;
       }
     }
-    throw adapterError("scrape_failed", "Campus active enrollment frame was not found");
+    throw adapterError(
+      "registration_portal_not_visible",
+      "The Campus registration view is not currently visible"
+    );
   }
 
   async function queryRegistrationWorkspace(filters = {}) {
@@ -1375,7 +1390,7 @@ export function createLiveCampusAdapter({
               // The core course/grade/history fan-out remains usable when the
               // optional personal dashboard is unavailable for the account.
             }
-            const [partialResult, historyResult] = await Promise.allSettled([
+            const [partialResult, historyResult, studentScheduleResult] = await Promise.allSettled([
               (async () => {
                 policy.assertRequest(targets.partialGradesUrl);
                 const gradesPage = await session.goto(targets.partialGradesUrl);
@@ -1388,6 +1403,11 @@ export function createLiveCampusAdapter({
                 policy.assertRequest(targets.historyUrl);
                 const historyPage = await session.goto(targets.historyUrl);
                 return parseLegacyHistoryHtml(historyPage.html);
+              })(),
+              (async () => {
+                policy.assertRequest(targets.studentScheduleUrl);
+                const schedulePage = await session.goto(targets.studentScheduleUrl);
+                return parseLegacyStudentScheduleHtml(schedulePage.html);
               })()
             ]);
             if (partialResult.status === "fulfilled") {
@@ -1488,6 +1508,21 @@ export function createLiveCampusAdapter({
                 reason: publicReason(historyResult.reason),
                 label: courseHub.label,
                 href: courseHub.href,
+                generatedAt: timestamp
+              };
+            }
+            if (studentScheduleResult.status === "fulfilled") {
+              modules.student_schedule = {
+                ...studentScheduleResult.value,
+                source: "student_schedule_page",
+                generatedAt: timestamp
+              };
+            } else {
+              modules.student_schedule = {
+                state: "unavailable",
+                items: [],
+                reason: publicReason(studentScheduleResult.reason),
+                source: "student_schedule_page",
                 generatedAt: timestamp
               };
             }
@@ -1919,7 +1954,45 @@ export function createLiveCampusAdapter({
     ) {
       throw adapterError("mutation_refused", "Current schedules must use read-only Campus sources");
     }
-    const workspace = await readRegistrationWorkspace(options);
+    const catalogFallback = async () => {
+      if (!/^\d{4}-\d{1,2}$/.test(String(options.term ?? ""))) {
+        throw adapterError(
+          "current_term_unavailable",
+          "The active term could not be derived for the Campus schedule catalog"
+        );
+      }
+      const fallback = await searchScheduleCatalog(options);
+      return {
+        ...fallback,
+        activeTerm: options.term,
+        enrollmentMode: null,
+        source: "schedule_catalog",
+        sourcesUsed: ["schedule_catalog"],
+        differences: [],
+        warnings: [
+          "The registration view is unavailable; schedule catalog counts can differ from enrollment-time values."
+        ],
+        retrievedAt: fallback.retrievedAt ?? now()
+      };
+    };
+    if (options.preferRegistrationPortal === false) {
+      return catalogFallback();
+    }
+    let workspace;
+    try {
+      workspace = await readRegistrationWorkspace(options);
+    } catch (error) {
+      const code = String(error?.code ?? "").toLowerCase();
+      const fallbackCodes = new Set([
+        "registration_portal_not_visible",
+        "registration_portal_unavailable",
+        "unsupported_layout",
+        "scrape_failed",
+        "timeout"
+      ]);
+      if (!fallbackCodes.has(code)) throw error;
+      return catalogFallback();
+    }
     const wanted = new Set((options.courseCodes ?? []).map((code) => String(code).trim().toUpperCase()));
     let items = (workspace.offerings ?? []).filter((item) =>
       (wanted.size === 0 || wanted.has(String(item.courseCode).toUpperCase())) &&
@@ -1933,13 +2006,13 @@ export function createLiveCampusAdapter({
     const missing = [...wanted].filter((code) => !present.has(code));
     const sourcesUsed = ["enrollment_portal"];
     const differences = [];
-    if (wanted.size > 0) {
+    if (wanted.size > 0 || options.academicScope || options.courseName) {
       try {
         const fallback = await searchScheduleCatalog({
           ...options,
           term: workspace.activeTerm,
           courseCodes: [...wanted],
-          academicScope: null
+          academicScope: wanted.size > 0 ? null : options.academicScope ?? null
         });
         if (fallback.state === "available") {
           const portalByKey = new Map(items.map((item) => [
@@ -1986,7 +2059,7 @@ export function createLiveCampusAdapter({
           sourcesUsed.push("schedule_catalog");
         }
       } catch (error) {
-        if (missing.length > 0) throw error;
+        if (missing.length > 0 || items.length === 0) throw error;
       }
     }
     return {

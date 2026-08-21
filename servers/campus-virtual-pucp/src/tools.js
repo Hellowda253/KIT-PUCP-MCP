@@ -237,6 +237,12 @@ export function createCampusTools(service) {
       handler: (args) => service.getEnrollmentStatus(args)
     },
     {
+      name: "get_student_schedule",
+      description: "Return the authenticated student's own active weekly schedule from the Campus Horario button, including classes, practices, laboratories, exams, rooms, and overlaps.",
+      inputSchema: schema(refresh),
+      handler: (args) => service.getStudentSchedule(args)
+    },
+    {
       name: "get_registration_portal_status",
       description: "Read the live active-registration view status, mode (regular or extemporaneous), term, enrollment turn, and course/credit totals without exposing identity or session fields.",
       inputSchema: schema(refresh),
@@ -250,7 +256,7 @@ export function createCampusTools(service) {
     },
     {
       name: "list_schedule_scopes",
-      description: "List the faculties and specialties currently offered by the authenticated Inscríbete aquí portal.",
+      description: "List the faculties and specialties exposed by the live registration view while that view is available.",
       inputSchema: schema(refresh),
       handler: (args) => service.listScheduleScopes(args)
     },
@@ -274,7 +280,7 @@ export function createCampusTools(service) {
     },
     {
       name: "search_course_schedules",
-      description: "Search the active enrollment term using the live registration view first (regular or compatible extemporaneous) and the shared PUCP schedule catalog to fill missing data; never accepts a term or uses historical data.",
+      description: "Search the active term using the live registration view when available and otherwise the shared PUCP schedule catalog; never accepts a term or uses historical data.",
       inputSchema: schema({
         courseCodes: { ...courseCodes, maxItems: 30 },
         courseName: { type: "string", maxLength: 120 },
@@ -336,7 +342,7 @@ export function createCampusTools(service) {
     },
     {
       name: "recommend_course_schedules",
-      description: "Generate and rank active-term non-conflicting schedules from Inscríbete aquí offerings; never enrolls or controls the Campus generator.",
+      description: "Generate and rank active-term non-conflicting schedules from the best currently available Campus source; never enrolls or controls the Campus generator.",
       inputSchema: schema({ courseCodes, preferences, maxResults: { type: "integer", minimum: 1, maximum: 20 }, ...refresh }, ["courseCodes"]),
       handler: (args) => service.recommendCourseSchedules(args)
     },

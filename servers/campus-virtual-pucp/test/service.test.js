@@ -254,6 +254,63 @@ test("missing schedule cache starts one exact read-only search job and returns p
   await service.waitForIdle();
 });
 
+test("stale schedule detail returns cache while one exact refresh runs", async () => {
+  const staleAt = "2026-07-24T08:00:00.000Z";
+  const seen = [];
+  const { service } = await setup({
+    scheduleCache: {
+      entries: [{
+        generatedAt: staleAt,
+        retrievedAt: staleAt,
+        query: { mode: "current", term: "2026-2", courseCodes: ["1IND50"], courseName: "", academicScope: null },
+        items: [{ courseCode: "1IND50", term: "2026-2", scheduleId: "0831", scheduleType: "class", sessions: [] }]
+      }]
+    },
+    adapter: {
+      async sync() { return snapshot; },
+      async searchCurrentCourseSchedules(input) {
+        seen.push(input);
+        return { state: "available", activeTerm: "2026-2", source: "schedule_catalog", sourcesUsed: ["schedule_catalog"], retrievedAt: generatedAt, items: [] };
+      }
+    }
+  });
+
+  const result = await service.getCourseScheduleDetails({
+    course: "1IND50",
+    schedule: "0831"
+  });
+  assert.equal(result.data.state, "available");
+  assert.equal(result.data.item.scheduleId, "0831");
+  assert.match(result.data.refreshJobId, /^course-schedules-/);
+  assert.match(result.warnings[0], /refresh/i);
+  await service.waitForIdle();
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].courseCodes, ["1IND50"]);
+});
+
+test("forced schedule recommendation refreshes the full requested course batch", async () => {
+  const seen = [];
+  const { service } = await setup({
+    adapter: {
+      async sync() { return snapshot; },
+      async searchCurrentCourseSchedules(input) {
+        seen.push(input);
+        return { state: "available", activeTerm: "2026-2", source: "schedule_catalog", sourcesUsed: ["schedule_catalog"], retrievedAt: generatedAt, items: [] };
+      }
+    }
+  });
+  const result = await service.recommendCourseSchedules({
+    courseCodes: ["1IND50", "1IND51"],
+    forceRefresh: true
+  });
+  assert.equal(result.data.status, "complete");
+  assert.match(result.data.refreshJobId, /^course-schedules-/);
+  assert.match(result.warnings[0], /refresh/i);
+  await service.waitForIdle();
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].courseCodes, ["1IND50", "1IND51"]);
+});
+
 test("academic schedule scope preserves visible names and official curriculum level", async () => {
   const seen = [];
   const { service } = await setup({
@@ -348,9 +405,33 @@ test("schedule scope resolution failures remain actionable in background job sta
   assert.equal(status.data.error.code, "schedule_scope_not_found");
 });
 
+test("background schedule timeouts expose only a safe category and stage", async () => {
+  const { service } = await setup({
+    scheduleCache: { entries: [] },
+    adapter: {
+      async sync() { return snapshot; },
+      async searchCurrentCourseSchedules() {
+        const error = new Error("password=do-not-leak at https://private.example.invalid");
+        error.name = "TimeoutError";
+        error.stage = "schedule_catalog.navigation";
+        throw error;
+      }
+    }
+  });
+  const queued = await service.searchCourseSchedules({ courseCodes: ["1IND50"] });
+  await service.waitForIdle();
+  const status = await service.getCampusJobStatus({ jobId: queued.data.jobId });
+  assert.equal(status.data.error.code, "timeout");
+  assert.equal(status.data.error.retryable, true);
+  assert.equal(status.data.error.stage, "schedule_catalog.navigation");
+  assert.equal(JSON.stringify(status.data.error).includes("do-not-leak"), false);
+  assert.equal(JSON.stringify(status.data.error).includes("private.example"), false);
+});
+
 test("current schedule search derives the active term and uses the registration portal source first", async () => {
   const seen = [];
   const { service } = await setup({
+    now: () => "2026-08-04T10:00:00-05:00",
     scheduleCache: { entries: [] },
     adapter: {
       sync: async () => snapshot,
@@ -368,16 +449,55 @@ test("current schedule search derives the active term and uses the registration 
     }
   });
   const queued = await service.searchCourseSchedules({ term: "2026-1", courseCodes: ["1IND50"] });
-  assert.equal(queued.data.query.term, "active");
+  assert.equal(queued.data.query.term, "2026-2");
   await service.waitForIdle();
   assert.equal(seen.length, 1);
   assert.equal(seen[0].allowMutations, false);
-  assert.equal(seen[0].term, "active");
+  assert.equal(seen[0].term, "2026-2");
+  assert.equal(seen[0].preferRegistrationPortal, true);
   assert.equal(Object.hasOwn(seen[0], "requestedTerm"), false);
   const result = await service.searchCourseSchedules({ courseCodes: ["1IND50"] });
   assert.deepEqual(result.data.sourcesUsed, ["enrollment_portal"]);
   assert.equal(result.data.activeTerm, "2026-2");
   assert.equal(result.data.enrollmentMode, "extemporaneous");
+});
+
+test("current schedule search skips the registration portal after the published window ended", async () => {
+  const seen = [];
+  const closedSnapshot = structuredClone(snapshot);
+  closedSnapshot.modules.enrollment_portal.value.sections[1].actions.push({
+    label: "Inscríbete aquí",
+    access: "confirmation_required"
+  });
+  const { service } = await setup({
+    now: () => "2026-08-21T12:00:00-05:00",
+    snapshot: closedSnapshot,
+    scheduleCache: { entries: [] },
+    adapter: {
+      sync: async () => snapshot,
+      async searchCurrentCourseSchedules(input) {
+        seen.push(input);
+        return {
+          state: "available",
+          activeTerm: "2026-2",
+          source: "schedule_catalog",
+          sourcesUsed: ["schedule_catalog"],
+          warnings: ["Schedule catalog counts can differ from enrollment-time values."],
+          retrievedAt: "2026-08-21T12:00:00-05:00",
+          items: []
+        };
+      }
+    }
+  });
+
+  await service.searchCourseSchedules({ courseCodes: ["1IND50"] });
+  await service.waitForIdle();
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].preferRegistrationPortal, false);
+  const result = await service.searchCourseSchedules({ courseCodes: ["1IND50"] });
+  assert.equal(result.data.source, "schedule_catalog");
+  assert.match(result.warnings.join(" "), /differ/i);
 });
 
 test("historical schedule search is isolated from the current enrollment cache and uses the shared catalog source", async () => {

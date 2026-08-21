@@ -261,21 +261,28 @@ function scheduleMetrics(options, preferences) {
   const dayCount = byDay.size;
   const fewerDays = Math.max(0, 1 - Math.max(0, dayCount - 1) / 5);
   const fewerGaps = Math.max(0, 1 - gapMinutes / Math.max(60, preferences.maxGapMinutes));
+  const preferredDays = new Set(preferences.preferredDays ?? []);
   const preferredHours = sessions.length
     ? sessions.reduce((sum, session) => {
         const midpoint = (minutes(session.start) + minutes(session.end)) / 2;
-        if (preferences.timePreference === "morning") return sum + (midpoint <= 13 * 60 ? 1 : 0.35);
-        if (preferences.timePreference === "afternoon") return sum + (midpoint >= 12 * 60 ? 1 : 0.35);
-        return sum + (midpoint >= 8 * 60 && midpoint <= 19 * 60 ? 1 : 0.7);
+        const dayAffinity = preferredDays.size === 0 || preferredDays.has(session.day) ? 1 : 0.5;
+        if (preferences.timePreference === "morning") return sum + (midpoint <= 13 * 60 ? 1 : 0.35) * dayAffinity;
+        if (preferences.timePreference === "afternoon") return sum + (midpoint >= 12 * 60 ? 1 : 0.35) * dayAffinity;
+        return sum + (midpoint >= 8 * 60 && midpoint <= 19 * 60 ? 1 : 0.7) * dayAffinity;
       }, 0) / sessions.length
     : 0;
+  const virtualCount = sessions.filter(({ virtual }) => virtual).length;
   const modalityLocation = preferences.preferredModality === "any"
     ? 1
-    : sessions.length
-      ? sessions.filter(({ virtual }) =>
-          preferences.preferredModality === "virtual" ? virtual : !virtual
-        ).length / sessions.length
-      : 0;
+    : sessions.length === 0
+      ? 0
+      : preferences.preferredModality === "hybrid"
+        ? virtualCount > 0 && virtualCount < sessions.length
+          ? 1
+          : 0
+        : preferences.preferredModality === "virtual"
+          ? virtualCount / sessions.length
+          : (sessions.length - virtualCount) / sessions.length;
   return {
     vacancySafety,
     fewerGaps,
@@ -348,6 +355,7 @@ export function evaluateCourseSchedule({ offerings = [], selections = [], prefer
   const hardReasons = selected.flatMap((option) => hardConstraintReasons(option, effective));
   const conflicts = conflictsFor(selected);
   const result = scored(selected, effective);
+  if (result.metrics.dayCount > Number(effective.maxDays)) hardReasons.push("max_days");
   return {
     valid: missing.length === 0 && hardReasons.length === 0 && conflicts.length === 0,
     missing,
@@ -366,7 +374,8 @@ export function recommendCourseSchedules({
   localPreferences = {},
   preferences = {},
   maxResults = 5,
-  retrievedAt = null
+  retrievedAt = null,
+  searchLimits = {}
 }) {
   const codes = [...new Set(courseCodes.map((code) => String(code).toUpperCase()))];
   if (codes.length === 0 || codes.length > 10) {
@@ -387,44 +396,70 @@ export function recommendCourseSchedules({
     })
   );
   const missingCourses = codes.filter((_, index) => candidates[index].length === 0);
+  const retainedLimit = Math.min(20, Math.max(1, Number(maxResults) || 5));
+  const maxStates = Math.max(1, Math.floor(Number(searchLimits.maxStates) || 100_000));
+  const compareRecommendations = (left, right) =>
+    right.score - left.score ||
+    left.courses.map(({ scheduleId }) => scheduleId).join("|").localeCompare(
+      right.courses.map(({ scheduleId }) => scheduleId).join("|")
+    );
   const valid = [];
+  let exploredStates = 0;
+  let validCombinations = 0;
+  let truncated = false;
   if (missingCourses.length === 0) {
+    const orderedCandidates = candidates
+      .map((options, index) => ({ code: codes[index], index, options: [...options].sort((left, right) =>
+        optionIds(left).join("|").localeCompare(optionIds(right).join("|"))
+      ) }))
+      .sort((left, right) => left.options.length - right.options.length || left.index - right.index);
     const chosen = [];
     const visit = (index) => {
-      if (index === candidates.length) {
-        const metrics = scored(chosen, effective);
+      if (truncated) return;
+      if (index === orderedCandidates.length) {
+        validCombinations += 1;
+        const orderedChosen = codes.map((code) =>
+          chosen.find((option) => option.courseCode === code)
+        );
+        const metrics = scored(orderedChosen, effective);
         valid.push({
-          courses: chosen.map(publicCourse),
+          courses: orderedChosen.map(publicCourse),
           conflicts: [],
           score: metrics.score,
           scoreBreakdown: metrics.scoreBreakdown,
           explanation: metrics.explanation,
           risks: metrics.metrics.risks
         });
+        valid.sort(compareRecommendations);
+        if (valid.length > retainedLimit) valid.length = retainedLimit;
         return;
       }
-      for (const option of candidates[index]) {
-        if (conflictsFor([...chosen, option]).length > 0) {
+      for (const option of orderedCandidates[index].options) {
+        if (exploredStates >= maxStates) {
+          truncated = true;
+          return;
+        }
+        exploredStates += 1;
+        if (chosen.some((selected) => conflictsFor([selected, option]).length > 0)) {
           unsatisfied.add("schedule_overlap");
           continue;
         }
         chosen.push(option);
+        const dayCount = new Set(chosen.flatMap(optionSessions).map(({ day }) => day)).size;
+        if (dayCount > Number(effective.maxDays)) {
+          unsatisfied.add("max_days");
+          chosen.pop();
+          continue;
+        }
         visit(index + 1);
         chosen.pop();
       }
     };
     visit(0);
   }
-  valid.sort(
-    (left, right) =>
-      right.score - left.score ||
-      left.courses.map(({ scheduleId }) => scheduleId).join("|").localeCompare(
-        right.courses.map(({ scheduleId }) => scheduleId).join("|")
-      )
-  );
   if (valid.length === 0) {
     return {
-      status: "no_valid_schedule",
+      status: truncated ? "search_limit_reached" : "no_valid_schedule",
       recommendations: [],
       missingCourses,
       unsatisfiedConstraints: [...unsatisfied].sort(),
@@ -432,15 +467,32 @@ export function recommendCourseSchedules({
         constraint,
         suggestion: `Review or relax ${constraint.replaceAll("_", " ")}.`
       })),
-      retrievedAt
+      retrievedAt,
+      search: {
+        exhaustive: !truncated,
+        exploredStates,
+        validCombinations,
+        retained: 0,
+        limitReason: truncated ? "state_budget" : null
+      }
     };
   }
   return {
-    status: "complete",
-    recommendations: valid.slice(0, Math.min(20, Math.max(1, Number(maxResults) || 5))),
-    consideredCombinations: valid.length,
+    status: truncated ? "partial" : "complete",
+    recommendations: valid,
+    consideredCombinations: validCombinations,
     preferences: effective,
     retrievedAt,
-    warnings: ["Vacancies are observations, never guarantees of enrollment."]
+    search: {
+      exhaustive: !truncated,
+      exploredStates,
+      validCombinations,
+      retained: valid.length,
+      limitReason: truncated ? "state_budget" : null
+    },
+    warnings: [
+      "Vacancies are observations, never guarantees of enrollment.",
+      ...(truncated ? ["Schedule search reached its safety budget; recommendations are the best retained partial results."] : [])
+    ]
   };
 }

@@ -2,7 +2,33 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-export async function writeJsonAtomic(filePath, value) {
+const TRANSIENT_RENAME_CODES = new Set(["EACCES", "EBUSY", "EPERM"]);
+
+function wait(delayMs) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function renameWithRetry(source, destination, options) {
+  const renameFile = options.renameFile ?? rename;
+  const retryDelays = options.retryDelays ?? [0, 10, 30, 75];
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await renameFile(source, destination);
+      return;
+    } catch (error) {
+      const retryDelay = retryDelays[attempt];
+      if (!TRANSIENT_RENAME_CODES.has(error?.code) || retryDelay === undefined) {
+        throw error;
+      }
+      if (retryDelay > 0) {
+        await wait(retryDelay);
+      }
+    }
+  }
+}
+
+export async function writeJsonAtomic(filePath, value, options = {}) {
   let serialized;
   try {
     serialized = JSON.stringify(value, null, 2);
@@ -33,7 +59,7 @@ export async function writeJsonAtomic(filePath, value) {
       mode: 0o600,
       flag: "wx"
     });
-    await rename(temporaryPath, destination);
+    await renameWithRetry(temporaryPath, destination, options);
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => {});
     throw error;

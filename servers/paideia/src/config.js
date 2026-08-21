@@ -28,7 +28,7 @@ export function defaultPaideiaPaths(env = process.env) {
     historyPath: path.join(dataRoot, "sync-history.json"),
     manifestPath: path.join(dataRoot, "download-manifest.json"),
     uniRoot: path.resolve(
-      env.PUCP_DOWNLOADS_DIR || path.join(repositoryRoot, "downloads", ".UNI V2")
+      env.PUCP_DOWNLOADS_DIR || path.join(repositoryRoot, "downloads", "Paideia")
     )
   };
 }

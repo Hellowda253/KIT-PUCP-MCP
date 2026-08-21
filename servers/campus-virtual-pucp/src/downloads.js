@@ -87,8 +87,7 @@ export function routeDocumentDestination(document, {
   if (document.sensitivity === "academic") {
     return path.join(
       path.resolve(uniRoot),
-      inferCourse(document),
-      "CAMPUS NUEVO"
+      inferCourse(document)
     );
   }
   if (document.sensitivity === "private") {

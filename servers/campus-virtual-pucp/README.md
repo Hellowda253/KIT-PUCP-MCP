@@ -10,6 +10,7 @@ uso. No confirma la matrícula definitiva ni envía otros formularios.
 - `get_campus_status`, `get_campus_job_status`
 - `sync_campus_virtual`, `list_campus_modules`, `list_campus_changes`
 - `get_campus_agenda`, `get_campus_day`
+- `get_student_schedule`
 - `list_enrolled_courses`, `list_official_grades`
 - `get_partial_grade_statistics`, `get_final_grade_statistics`
 - `get_academic_history`, `get_academic_performance`
@@ -58,13 +59,19 @@ tienen una posición independiente se marcan `not_applicable`.
 
 ## Matrícula y recomendación de horarios
 
-Para el ciclo vigente, el servidor consulta primero “Inscríbete aquí”, cuyo
-encabezado visible determina el ciclo activo. `search_course_schedules` no
-acepta `term`; informa fuentes, antigüedad y discrepancias, y da precedencia al
-portal de inscripción para `Vac.`, `Vac.Unid`, `Ins.`, `Mat.`, estado y
-`Posic. Relat.`. Un único catálogo de horarios PUCP completa profesores,
-sesiones, aulas y otros detalles faltantes; se consulta sin autenticación
-adicional cuando esa vista está disponible públicamente.
+`get_student_schedule` es la fuente principal cuando el alumno pide su propio
+horario: lee el botón autenticado `Horario` de Cursos y actividades académicas
+y normaliza clases, prácticas, laboratorios, exámenes, aulas y superposiciones.
+
+Para la oferta del ciclo vigente, durante una ventana activa el servidor
+consulta primero “Inscríbete aquí”, cuyo encabezado visible determina el ciclo.
+Cuando el calendario indica que la ventana terminó y la vista ya no se anuncia,
+omite ese intento y consulta directamente el catálogo compartido de horarios,
+evitando el timeout de una página cerrada. `search_course_schedules` no acepta
+`term`; informa fuentes, antigüedad y discrepancias. Mientras el portal de
+inscripción está activo, este prevalece para `Vac.`, `Vac.Unid`, `Ins.`, `Mat.`,
+estado y `Posic. Relat.`. Fuera de esa ventana se advierte que los conteos del
+catálogo pueden diferir de los valores de inscripción.
 `search_historical_course_schedules` exige un ciclo y consulta ese mismo
 catálogo; sus resultados no alimentan recomendaciones ni acciones actuales.
 
@@ -140,8 +147,8 @@ CAMPUS_PUCP_CHROME_PATH=
 CAMPUS_PUCP_AUTH_HOSTS=pandora.pucp.edu.pe
 CAMPUS_PUCP_READ_HOSTS=eros.pucp.edu.pe,ares.pucp.edu.pe
 CAMPUS_PUCP_MAX_RESPONSE_BYTES=52428800
-CAMPUS_PUCP_UNI_ROOT=.\downloads\.UNI V2
-CAMPUS_PUCP_PRIVATE_ROOT=.\downloads\PUCP Privado
+CAMPUS_PUCP_UNI_ROOT=.\downloads\Campus
+CAMPUS_PUCP_PRIVATE_ROOT=.\downloads\Privado
 ```
 
 Las credenciales Campus tienen prioridad y, si faltan, se usan
@@ -221,11 +228,11 @@ La sincronización normaliza:
 caché. El llamador no puede declarar ni reemplazar su sensibilidad:
 
 - programas analíticos, sílabos y material académico se guardan en
-  `.UNI V2\<curso>\CAMPUS NUEVO`;
+  `<raíz académica>\<curso>`;
 - cuando el curso no puede inferirse, se usa
-  `.UNI V2\Campus Virtual\CAMPUS NUEVO`;
+  `<raíz académica>\Campus Virtual`;
 - notas, certificados y documentos de pago/personales se guardan en
-  `PUCP Privado\<categoría>`.
+  `<raíz privada>\<categoría>`.
 
 Se validan origen/redirección, MIME, extensión y tamaño antes de escribir. Las
 rutas finales y todos los ancestros existentes se comprueban contra junctions

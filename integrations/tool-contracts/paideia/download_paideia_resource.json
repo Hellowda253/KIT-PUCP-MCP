@@ -1,6 +1,6 @@
 {
   "name": "download_paideia_resource",
-  "description": "Explicitly queue one cached Paideia file or folder download inside the safe .UNI V2 root.",
+  "description": "Explicitly queue one cached Paideia file or folder download inside the configured safe download root.",
   "parameters": {
     "type": "object",
     "properties": {

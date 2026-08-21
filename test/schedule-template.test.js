@@ -10,6 +10,7 @@ const skillRoot = path.join(root, "skills", "pucp-campus-virtual");
 const templatePath = path.join(skillRoot, "assets", "horario-pucp.html");
 const rendererPath = path.join(skillRoot, "scripts", "render-schedule.mjs");
 const layoutPath = path.join(skillRoot, "scripts", "schedule-layout.mjs");
+const displayPath = path.join(skillRoot, "scripts", "schedule-display.mjs");
 
 async function exists(file) {
   try {
@@ -128,6 +129,49 @@ test("desktop events expand on hover or keyboard focus and obscure only crossed 
   assert.match(html, /event\.addEventListener\("pointerleave",[\s\S]*clearEventFocus\(dayColumn\)/);
   assert.match(html, /event\.addEventListener\("focus",[\s\S]*activateEventFocus\(event\)/);
   assert.match(html, /event\.addEventListener\("blur",[\s\S]*clearEventFocus\(dayColumn\)/);
+  assert.match(html, /event\.dataset\.baseHeight/);
+  assert.match(html, /event\.scrollHeight/);
+  assert.match(html, /event\.style\.height/);
+});
+
+test("schedule display keeps official values and derives readable labels", async () => {
+  assert.equal(await exists(displayPath), true, "schedule display formatter must exist");
+  const { prepareScheduleDisplayData } = await import(pathToFileURL(displayPath));
+  const input = {
+    term: "2026-2",
+    credits: 4,
+    courses: [{
+      code: "1IND52",
+      name: "DISEÑO DE LA CADENA DE SUMINISTROS Y OPERACIONES",
+      instructor: "ROJAS POLO, JONATAN EDWARD"
+    }],
+    sessions: [{
+      day: 1,
+      start: "10:00",
+      end: "13:00",
+      type: "class",
+      title: "DISEÑO DE LA CADENA DE SUMINISTROS Y OPERACIONES",
+      instructor: "ROJAS POLO, JONATAN EDWARD"
+    }]
+  };
+
+  const result = prepareScheduleDisplayData(input);
+  assert.equal(result.courses[0].name, input.courses[0].name, "official course name must remain unchanged");
+  assert.equal(result.courses[0].instructor, input.courses[0].instructor, "official instructor must remain unchanged");
+  assert.equal(result.courses[0].displayName, "Diseño de la Cadena de Suministros y Operaciones");
+  assert.equal(result.courses[0].displayInstructor, "Rojas Polo, J. E.");
+  assert.equal(result.sessions[0].title, input.sessions[0].title, "official session title must remain unchanged");
+  assert.equal(result.sessions[0].displayTitle, "Diseño de la Cadena de Suministros y Operaciones");
+  assert.equal(result.sessions[0].displayInstructor, "Rojas Polo, J. E.");
+});
+
+test("schedule display compacts explicitly separated multiple instructors", async () => {
+  const { compactInstructor } = await import(pathToFileURL(displayPath));
+  assert.equal(
+    compactInstructor("ATOCHE DIAZ, WILMER JHONNY / FERNANDEZ PEREZ, MIGUEL ANGEL"),
+    "Atoche Diaz, W. J. / Fernandez Perez, M. A."
+  );
+  assert.equal(compactInstructor("Cornejo, C"), "Cornejo, C");
 });
 
 test("schedule renderer embeds normalized data into a standalone HTML file", async () => {
@@ -193,6 +237,10 @@ test("Campus skill points agents to the bundled schedule renderer", async () => 
   assert.match(reference, /scripts\/render-schedule\.mjs/);
   assert.match(reference, /--data/);
   assert.match(reference, /--output/);
+  assert.match(skill, /No (?:crees|construyas|escribas).*HTML.*(?:desde cero|propio)/i);
+  assert.match(reference, /separa.*docentes.*\//i);
+  assert.match(reference, /abre.*HTML.*verifica/i);
+  assert.match(reference, /evita.*mayúsculas/i);
 });
 
 test("public installations discover and copy the complete HTML schedule skill", async () => {

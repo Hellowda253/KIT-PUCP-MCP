@@ -30,9 +30,11 @@ permanecen bloqueados.
   entregas, avisos, calificaciones visibles y materiales descargables.
 - `campus_virtual_pucp`: agenda, cursos matriculados, notas, historia,
   rendimiento, currículo, matrícula, finanzas, trámites, documentos y
-  estadísticas institucionales de evaluaciones. Durante matrícula consulta
-  “Inscríbete aquí” como fuente principal, lo complementa con un único catálogo
-  de horarios, separa las consultas actuales de las históricas y genera
+  estadísticas institucionales de evaluaciones. El horario propio se lee del
+  botón autenticado `Horario`. Durante una ventana de matrícula consulta
+  “Inscríbete aquí” como fuente principal; cuando esa vista ya cerró va
+  directamente al catálogo compartido de horarios, cuyos conteos pueden diferir
+  de los valores de inscripción. Separa las consultas actuales de las históricas y genera
   localmente recomendaciones de horarios. Puede preparar cambios de inscripción y
   guardarlos solo tras una confirmación explícita con token de un uso. Reconoce
   de forma anticipada una vista equivalente de “Matrícula extemporánea” para
@@ -81,7 +83,8 @@ CAMPUS_PUCP_PASS=
 ```
 
 Los valores por defecto guardan información local ignorada por Git en
-`data/` y descargas en `downloads/.UNI V2` y `downloads/PUCP Privado`. Puedes
+`data/` y descargas en `downloads/Paideia`, `downloads/Campus` y
+`downloads/Privado`. Puedes
 cambiar esas rutas mediante las variables de `.env.example`.
 
 ### Primer uso

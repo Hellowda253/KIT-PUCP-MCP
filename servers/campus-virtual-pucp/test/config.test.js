@@ -67,10 +67,10 @@ test("Campus config honors explicit academic and private download roots", () => 
 
 test("Campus public defaults keep downloads inside the repository", () => {
   const paths = defaultCampusPaths({});
-  assert.equal(path.basename(paths.uniRoot), ".UNI V2");
-  assert.equal(path.basename(paths.privateRoot), "PUCP Privado");
-  assert.match(paths.uniRoot, /[\\/]downloads[\\/]\.UNI V2$/i);
-  assert.match(paths.privateRoot, /[\\/]downloads[\\/]PUCP Privado$/i);
-  assert.equal(paths.uniRoot, path.resolve("downloads", ".UNI V2"));
-  assert.equal(paths.privateRoot, path.resolve("downloads", "PUCP Privado"));
+  assert.equal(path.basename(paths.uniRoot), "Campus");
+  assert.equal(path.basename(paths.privateRoot), "Privado");
+  assert.match(paths.uniRoot, /[\\/]downloads[\\/]Campus$/i);
+  assert.match(paths.privateRoot, /[\\/]downloads[\\/]Privado$/i);
+  assert.equal(paths.uniRoot, path.resolve("downloads", "Campus"));
+  assert.equal(paths.privateRoot, path.resolve("downloads", "Privado"));
 });

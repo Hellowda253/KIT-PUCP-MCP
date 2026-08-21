@@ -508,7 +508,8 @@ export function parseLegacyAcademicTargets(html, pageUrl) {
       term: "",
       partialGradesUrl: "",
       historyUrl: "",
-      personalPanelUrl: ""
+      personalPanelUrl: "",
+      studentScheduleUrl: ""
     };
   }
   const base = new URL(pageUrl);
@@ -522,6 +523,21 @@ export function parseLegacyAcademicTargets(html, pageUrl) {
   const history = new URLSearchParams({
     accion: "Ingresar",
     codigo: context.studentCode
+  });
+  const studentSchedule = new URLSearchParams({
+    accion: "MostrarResultadosHorAcad",
+    alumno: context.studentCode,
+    cicloano: context.year,
+    ciclo: context.cycle,
+    tipociclo: context.cycleType,
+    facultad: "",
+    rama: "",
+    checkclases: "1",
+    checkpra: "1",
+    checklab: "1",
+    checkexaotros: "1",
+    indicasesiones: "1",
+    formatedlistacursos: ""
   });
   return {
     state: "available",
@@ -537,7 +553,126 @@ export function parseLegacyAcademicTargets(html, pageUrl) {
     personalPanelUrl: new URL(
       `/pucp/general/gewpealu/gewpealu?accion=AbrirPanel&codigo=${encodeURIComponent(context.studentCode)}&misdatos=1`,
       base.origin
+    ).href,
+    studentScheduleUrl: new URL(
+      `/pucp/horarios/howhorac/howhorac?${studentSchedule}`,
+      base.origin
     ).href
+  };
+}
+
+const STUDENT_SCHEDULE_DAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday"
+];
+
+const STUDENT_SCHEDULE_TYPES = {
+  A: "advising",
+  T: "class",
+  D: "directed_practice",
+  L: "laboratory",
+  P: "practice",
+  E: "exam"
+};
+
+function legacyRawTableRows(tableHtml) {
+  return [...String(tableHtml).matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map(
+    (row) => [...row[1].matchAll(/<(?:th|td)\b[^>]*>([\s\S]*?)<\/(?:th|td)>/gi)]
+      .map((cell) => cell[1])
+  );
+}
+
+function studentScheduleRoom(fragment, scheduleId, rawType) {
+  const text = cleanText(fragment);
+  const escapedSchedule = scheduleId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(
+    new RegExp(`\\b${rawType}\\s+${escapedSchedule}\\s*-\\s*(.+?)\\s+Sec\\.`, "i")
+  );
+  return cleanText(match?.[1] ?? "");
+}
+
+function studentScheduleModality(room) {
+  if (/\b(?:virtual|remot|zoom|teams)\b/i.test(room)) return "virtual";
+  if (!room || /^-+$/.test(room)) return "unknown";
+  return "in_person";
+}
+
+function padHour(value) {
+  return `${String(value).padStart(2, "0")}:00`;
+}
+
+export function parseLegacyStudentScheduleHtml(html) {
+  const term = cleanText(html).match(/\b(\d{4})-(\d{1,2})\b/);
+  const table = [...String(html).matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)]
+    .map((match) => match[1])
+    .find((candidate) => {
+      const first = legacyRawTableRows(candidate)[0] ?? [];
+      const headers = first.map((cell) => searchableText(cleanText(cell)));
+      return headers[0] === "hora" && headers.includes("lunes") && headers.includes("domingo");
+    });
+  if (!table) {
+    return { state: "unavailable", reason: "unsupported_layout", term: "", items: [] };
+  }
+
+  const rows = legacyRawTableRows(table).slice(1);
+  const slots = [];
+  const sequencePattern =
+    /MostrarFechasSecuencia\(\s*'(\d{4})'\s*,\s*'(\d{2})'\s*,\s*'(\d{2})'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([A-Z])'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*\)/i;
+  for (const cells of rows) {
+    const time = cleanText(cells[0] ?? "").match(/(\d{1,2}):00\s*-\s*(\d{1,2}):00/);
+    if (!time) continue;
+    for (let dayIndex = 0; dayIndex < STUDENT_SCHEDULE_DAYS.length; dayIndex += 1) {
+      const cell = cells[dayIndex + 1] ?? "";
+      const fragments = [...cell.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+        .map((match) => match[1]);
+      for (const fragment of fragments.length > 0 ? fragments : [cell]) {
+        const sequence = fragment.match(sequencePattern);
+        if (!sequence) continue;
+        const rawType = sequence[6].toUpperCase();
+        const scheduleId = cleanText(sequence[5]);
+        const room = studentScheduleRoom(fragment, scheduleId, rawType);
+        slots.push({
+          courseCode: cleanText(sequence[4]).toUpperCase(),
+          courseName: cleanText(sequence[9]),
+          term: `${sequence[1]}-${Number(sequence[2])}`,
+          scheduleId,
+          scheduleType: STUDENT_SCHEDULE_TYPES[rawType] ?? "other",
+          rawScheduleType: rawType,
+          section: cleanText(sequence[7]),
+          day: STUDENT_SCHEDULE_DAYS[dayIndex],
+          start: padHour(time[1]),
+          end: padHour(time[2]),
+          room,
+          modality: studentScheduleModality(room)
+        });
+      }
+    }
+  }
+
+  slots.sort((left, right) =>
+    STUDENT_SCHEDULE_DAYS.indexOf(left.day) - STUDENT_SCHEDULE_DAYS.indexOf(right.day) ||
+    left.start.localeCompare(right.start) ||
+    left.courseCode.localeCompare(right.courseCode) ||
+    left.scheduleType.localeCompare(right.scheduleType)
+  );
+  const items = [];
+  for (const slot of slots) {
+    const previous = items.at(-1);
+    const same = previous && [
+      "courseCode", "scheduleId", "scheduleType", "section", "day", "room"
+    ].every((key) => previous[key] === slot[key]);
+    if (same && previous.end === slot.start) previous.end = slot.end;
+    else items.push(slot);
+  }
+  return {
+    state: "available",
+    term: term ? `${term[1]}-${Number(term[2])}` : items[0]?.term ?? "",
+    items
   };
 }
 

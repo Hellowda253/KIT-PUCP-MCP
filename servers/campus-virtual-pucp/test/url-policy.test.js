@@ -358,6 +358,20 @@ test("known enrollment report GET actions are readable while enrollment writes r
   );
 });
 
+test("only the exact authenticated student schedule query is readable", () => {
+  const exact =
+    "https://eros.pucp.edu.pe/pucp/horarios/howhorac/howhorac?accion=MostrarResultadosHorAcad&alumno=20990001&cicloano=2026&ciclo=02&tipociclo=00&facultad=&rama=&checkclases=1&checkpra=1&checklab=1&checkexaotros=1&indicasesiones=1&formatedlistacursos=";
+  assert.doesNotThrow(() => policy.assertRequest(exact));
+  assert.throws(
+    () => policy.assertRequest(`${exact}&confirmar=1`),
+    (error) => error.code === "url_not_allowed"
+  );
+  assert.throws(
+    () => policy.assertRequest(exact.replace("checkexaotros=1", "checkexaotros=0")),
+    (error) => error.code === "url_not_allowed"
+  );
+});
+
 test("only the exact confirmed registration update form is accepted by the dedicated write guard", () => {
   const url = "https://campus.example.edu/pucp/prematri/pmwmatrc/pmwmatrc?accion=ActualizarInscripcion";
   assert.doesNotThrow(() => policy.assertRegistrationWrite(url, {

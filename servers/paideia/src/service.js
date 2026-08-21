@@ -28,6 +28,23 @@ const EMPTY = Object.freeze({
   grades: {}
 });
 
+const SYNC_COMPONENTS = Object.freeze([
+  "catalog",
+  "course_content",
+  "activity_details",
+  "announcements",
+  "grades"
+]);
+
+const SYNC_SCOPES = Object.freeze({
+  full: SYNC_COMPONENTS,
+  catalog: ["catalog"],
+  materials: ["catalog", "course_content"],
+  activities: ["catalog", "course_content", "activity_details"],
+  announcements: ["catalog", "course_content", "announcements"],
+  grades: ["catalog", "grades"]
+});
+
 function clamp(value, fallback, maximum) {
   const parsed = Number(value ?? fallback);
   return Math.max(1, Math.min(Number.isFinite(parsed) ? Math.floor(parsed) : fallback, maximum));
@@ -46,12 +63,27 @@ function matches(value, query) {
   return !query || searchableText(value).includes(searchableText(query));
 }
 
+function syncComponents(options = {}) {
+  const requested = Array.isArray(options.components)
+    ? options.components
+    : SYNC_SCOPES[options.scope ?? "full"];
+  if (!requested) {
+    throw new McpToolError("sync_scope_invalid", "Unknown Paideia synchronization scope");
+  }
+  const wanted = new Set(["catalog", ...requested]);
+  return SYNC_COMPONENTS.filter((component) => wanted.has(component));
+}
+
 function safeJobError(error) {
-  const normalizedCode =
+  let normalizedCode =
     typeof error?.code === "string"
       ? error.code.toLowerCase().replace(/[^a-z0-9]+/g, "_")
       : "";
+  if (!normalizedCode && /timeout/i.test(String(error?.name ?? ""))) {
+    normalizedCode = "timeout";
+  }
   const knownCode = [
+      "area_cooldown",
       "authentication_required",
       "download_failed",
       "download_limit_reached",
@@ -60,17 +92,39 @@ function safeJobError(error) {
       "resource_not_downloadable",
       "resource_too_large",
       "scrape_failed",
+      "timeout",
+      "transient_error",
+      "unsupported_layout",
       "url_not_allowed"
     ].includes(normalizedCode);
   const publicCode = knownCode ? normalizedCode : "operation_failed";
-  return {
-    code: publicCode,
-    message:
-      knownCode && typeof error.message === "string"
-        ? error.message
-        : "The Paideia background operation failed",
-    retryable: ["network_error", "operation_failed"].includes(publicCode)
+  const messages = {
+    area_cooldown: "An optional Paideia area is temporarily in cooldown",
+    authentication_required: "Paideia authentication is required",
+    download_failed: "The Paideia download failed",
+    download_limit_reached: "The Paideia download concurrency limit was reached",
+    network_error: "Paideia returned a network error",
+    path_not_allowed: "The Paideia download path is not allowed",
+    resource_not_downloadable: "The Paideia resource is not downloadable",
+    resource_too_large: "The Paideia resource exceeds the configured size limit",
+    scrape_failed: "The Paideia page could not be extracted safely",
+    timeout: "The Paideia operation timed out",
+    transient_error: "Paideia returned a transient error",
+    unsupported_layout: "The Paideia page layout is not supported",
+    url_not_allowed: "The Paideia URL is not allowed"
   };
+  const result = {
+    code: publicCode,
+    message: messages[publicCode] ?? "The Paideia background operation failed",
+    retryable: ["network_error", "operation_failed", "timeout", "transient_error"].includes(publicCode)
+  };
+  if (/^[a-z0-9_.-]{1,80}$/i.test(String(error?.stage ?? ""))) {
+    result.stage = error.stage;
+  }
+  if (Number.isInteger(error?.httpStatus) && error.httpStatus >= 400 && error.httpStatus <= 599) {
+    result.httpStatus = error.httpStatus;
+  }
+  return result;
 }
 
 function summarizeJobResult(result) {
@@ -143,8 +197,101 @@ function mergeUnavailableMap(previous = {}, current = {}, failed = new Set()) {
 }
 
 function mergeSyncSnapshot(previous, current) {
-  if (!previous) return current;
+  const coverage = current.coverage;
+  const generatedAt = current.generatedAt ?? previous?.generatedAt;
+  const previousComponentGeneratedAt = previous?.componentGeneratedAt ?? Object.fromEntries(
+    SYNC_COMPONENTS.map((component) => [component, previous?.generatedAt ?? null])
+  );
+  const refreshedComponents = coverage?.components ?? SYNC_COMPONENTS;
+  const componentGeneratedAt = {
+    ...previousComponentGeneratedAt,
+    ...Object.fromEntries(refreshedComponents.map((component) => [component, generatedAt]))
+  };
+  if (!previous) {
+    const { coverage: _coverage, failedCourseIds: _failedCourseIds, ...cleanCurrent } = current;
+    return {
+      ...cleanCurrent,
+      componentGeneratedAt,
+      lastSyncCoverage: coverage ?? { components: SYNC_COMPONENTS, allCourses: true }
+    };
+  }
   const failed = new Set(current.failedCourseIds ?? []);
+  if (coverage) {
+    const components = new Set(refreshedComponents);
+    const areaStates = current.areaStates ?? previous.areaStates ?? [];
+    const availableAreas = new Set(
+      areaStates.filter(({ state }) => state === "available").map(({ area }) => area)
+    );
+    const currentCourses = current.courses ?? [];
+    const previousById = new Map((previous.courses ?? []).map((course) => [course.id, course]));
+    const currentById = new Map(currentCourses.map((course) => [course.id, course]));
+    let courses = components.has("catalog")
+      ? [
+          ...currentCourses,
+          ...(previous.courses ?? []).filter((course) => !availableAreas.has(course.area))
+        ]
+      : [...(previous.courses ?? [])];
+    courses = [...new Map(courses.map((course) => [course.id, course])).values()]
+      .map((course) => {
+        const prior = previousById.get(course.id);
+        const refreshed = currentById.get(course.id);
+        if (
+          components.has("course_content") &&
+          refreshed &&
+          !failed.has(course.id)
+        ) {
+          return refreshed;
+        }
+        return prior ? { ...course, sections: prior.sections ?? [] } : course;
+      });
+    const activeCourseIds = new Set(courses.map(({ id }) => id));
+    const refreshedCourseIds = new Set(
+      currentCourses
+        .filter((course) => availableAreas.has(course.area) && !failed.has(course.id))
+        .map(({ id }) => id)
+    );
+    const mergeRows = (field) => {
+      const rows = components.has("course_content")
+        ? [
+            ...(current[field] ?? []).filter((item) => refreshedCourseIds.has(item.courseId)),
+            ...(previous[field] ?? []).filter((item) => !refreshedCourseIds.has(item.courseId))
+          ]
+        : [...(previous[field] ?? [])];
+      return rows.filter((item) => activeCourseIds.has(item.courseId));
+    };
+    const activities = mergeRows("activities");
+    const activeActivityIds = new Set(activities.map(({ id }) => id));
+    const activityDetails = components.has("activity_details")
+      ? mergeUnavailableMap(previous.activityDetails, current.activityDetails)
+      : { ...(previous.activityDetails ?? {}) };
+    const announcements = components.has("announcements")
+      ? mergeUnavailableMap(previous.announcements, current.announcements, failed)
+      : { ...(previous.announcements ?? {}) };
+    const grades = components.has("grades")
+      ? mergeUnavailableMap(previous.grades, current.grades, failed)
+      : { ...(previous.grades ?? {}) };
+    const { coverage: _coverage, failedCourseIds: _failedCourseIds, ...cleanCurrent } = current;
+    return {
+      ...previous,
+      ...cleanCurrent,
+      courses,
+      activities,
+      pendingItems: mergeRows("pendingItems"),
+      materials: mergeRows("materials"),
+      activityDetails: Object.fromEntries(
+        Object.entries(activityDetails).filter(([id]) => activeActivityIds.has(id))
+      ),
+      announcements: Object.fromEntries(
+        Object.entries(announcements).filter(([courseId]) => activeCourseIds.has(courseId))
+      ),
+      grades: Object.fromEntries(
+        Object.entries(grades).filter(([courseId]) => activeCourseIds.has(courseId))
+      ),
+      areaStates,
+      componentGeneratedAt,
+      lastSyncCoverage: coverage
+    };
+  }
   const mergeCourseRows = (field) => [
     ...(current[field] ?? []).filter((item) => !failed.has(item.courseId)),
     ...(previous[field] ?? []).filter((item) => failed.has(item.courseId))
@@ -174,7 +321,9 @@ function mergeSyncSnapshot(previous, current) {
       current.announcements,
       failed
     ),
-    grades: mergeUnavailableMap(previous.grades, current.grades, failed)
+    grades: mergeUnavailableMap(previous.grades, current.grades, failed),
+    componentGeneratedAt,
+    lastSyncCoverage: { components: SYNC_COMPONENTS, allCourses: true }
   };
 }
 
@@ -207,7 +356,7 @@ export function createPaideiaService({
   manifestPath,
   adapter,
   now = () => new Date().toISOString(),
-  uniRoot = path.resolve("downloads", ".UNI V2"),
+  uniRoot = path.resolve("downloads", "Paideia"),
   maxActiveDownloads = 2,
   jobTtlSeconds = 60 * 60,
   maxRetainedJobs = 100
@@ -318,8 +467,10 @@ export function createPaideiaService({
     }
     const job = startJob("sync", async (jobId) => {
       const previous = await readSnapshot({ optional: true });
+      const components = syncComponents(options);
       const scraped = await adapter.sync({
         ...options,
+        components,
         previousSnapshot: previous,
         metadataOnly: true
       });
@@ -338,21 +489,30 @@ export function createPaideiaService({
         activityCount: normalized.activities.length,
         pendingCount: normalized.pendingItems.length,
         materialCount: normalized.materials.length,
+        components,
+        ...(scraped.timings ? { timings: scraped.timings } : {}),
+        ...(scraped.failures ? { failures: scraped.failures } : {}),
         changes: history.summary
       };
     });
+    job.syncOptions = {
+      scope: options.scope ?? "full",
+      components: syncComponents(options),
+      reason: options.reason ?? ""
+    };
     activeSyncJobId = job.jobId;
     return job;
   }
 
   async function envelope(snapshot, data, {
     ttlSeconds = TTL_SECONDS.academic,
+    generatedAt = snapshot.generatedAt,
     warnings = []
   } = {}) {
     return createEnvelope({
       source: SOURCE,
       retrievedAt: snapshot.retrievedAt ?? snapshot.generatedAt,
-      generatedAt: snapshot.generatedAt,
+      generatedAt,
       ttlSeconds,
       data,
       warnings,
@@ -361,20 +521,30 @@ export function createPaideiaService({
   }
 
   async function query(options, select, {
-    ttlSeconds = TTL_SECONDS.academic
+    ttlSeconds = TTL_SECONDS.academic,
+    components = SYNC_COMPONENTS
   } = {}) {
     const snapshot = await readSnapshot();
+    const normalizedComponents = syncComponents({ components });
+    const freshnessComponent = normalizedComponents.find((component) => component !== "catalog") ?? "catalog";
+    const generatedAt = snapshot.componentGeneratedAt?.[freshnessComponent] ?? snapshot.generatedAt;
     const refresh = shouldRefresh({
       forceRefresh: Boolean(options.forceRefresh),
-      generatedAt: snapshot.generatedAt,
+      generatedAt,
       now: now(),
       ttlSeconds
     });
-    const job = refresh ? startSync({ reason: options.forceRefresh ? "forced" : "stale" }) : null;
+    const job = refresh
+      ? startSync({
+          reason: options.forceRefresh ? "forced" : "stale",
+          components: normalizedComponents
+        })
+      : null;
     const data = await select(snapshot);
     if (job) data.refreshJobId = job.jobId;
     return envelope(snapshot, data, {
       ttlSeconds,
+      generatedAt,
       warnings: job
         ? ["Cached data was returned while a Paideia metadata refresh runs in the background."]
         : []
@@ -409,7 +579,7 @@ export function createPaideiaService({
         courses,
         areaStates: snapshot.areaStates ?? []
       };
-    });
+    }, { components: SYNC_SCOPES.catalog });
   }
 
   async function getCourseOutline(options) {
@@ -441,7 +611,7 @@ export function createPaideiaService({
           truncated: allSections.length > sections.length
         }
       };
-    });
+    }, { components: SYNC_SCOPES.materials });
   }
 
   async function listActivities(options = {}) {
@@ -455,7 +625,7 @@ export function createPaideiaService({
         (item) => `${item.course} ${item.section} ${item.title}`
       ).slice(0, clamp(options.limit, 50, 200));
       return { count: items.length, items };
-    });
+    }, { components: SYNC_SCOPES.materials });
   }
 
   async function getActivityDetails(options) {
@@ -473,7 +643,7 @@ export function createPaideiaService({
           id: activity.id
         }
       };
-    });
+    }, { components: SYNC_SCOPES.activities });
   }
 
   async function listPendingItems(options = {}) {
@@ -487,7 +657,7 @@ export function createPaideiaService({
         (item) => `${item.dueDate || "9999"} ${item.course} ${item.title}`
       ).slice(0, clamp(options.limit, 40, 100));
       return { count: items.length, items };
-    });
+    }, { components: SYNC_SCOPES.materials });
   }
 
   async function listNextPendingItems(options = {}) {
@@ -503,7 +673,7 @@ export function createPaideiaService({
         )
         .slice(0, clamp(options.limit, 5, 30));
       return { count: items.length, items };
-    });
+    }, { components: SYNC_SCOPES.materials });
   }
 
   async function listAnnouncements(options) {
@@ -520,7 +690,7 @@ export function createPaideiaService({
           .filter((item) => matches(`${item.title} ${item.summary}`, options.query))
           .slice(0, clamp(options.limit, 30, 100))
       };
-    });
+    }, { components: SYNC_SCOPES.announcements });
   }
 
   async function listCourseGrades(options) {
@@ -537,7 +707,7 @@ export function createPaideiaService({
           matches(`${item.name} ${item.category}`, options.query)
         )
       };
-    });
+    }, { components: SYNC_SCOPES.grades });
   }
 
   async function searchMaterials(options = {}) {
@@ -551,7 +721,10 @@ export function createPaideiaService({
         (item) => `${item.course} ${item.section} ${item.title}`
       ).slice(0, clamp(options.limit, 30, 80));
       return { count: items.length, items };
-    }, { ttlSeconds: TTL_SECONDS.materialAdmin });
+    }, {
+      ttlSeconds: TTL_SECONDS.materialAdmin,
+      components: SYNC_SCOPES.materials
+    });
   }
 
   async function listMaterialChanges(options = {}) {
@@ -576,6 +749,8 @@ export function createPaideiaService({
         cacheAvailable: Boolean(snapshot),
         cachePath,
         generatedAt: snapshot?.generatedAt ?? null,
+        componentGeneratedAt: snapshot?.componentGeneratedAt ?? null,
+        lastSyncCoverage: snapshot?.lastSyncCoverage ?? null,
         areaStates: snapshot?.areaStates ?? [],
         activeJobId: activeSyncJobId || null,
         jobs: [...jobs.values()].reduce((counts, job) => {

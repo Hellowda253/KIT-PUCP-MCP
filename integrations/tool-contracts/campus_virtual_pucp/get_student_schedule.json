@@ -1,6 +1,6 @@
 {
-  "name": "list_schedule_scopes",
-  "description": "List the faculties and specialties exposed by the live registration view while that view is available.",
+  "name": "get_student_schedule",
+  "description": "Return the authenticated student's own active weekly schedule from the Campus Horario button, including classes, practices, laboratories, exams, rooms, and overlaps.",
   "parameters": {
     "type": "object",
     "properties": {

@@ -57,7 +57,18 @@ No requiere perfiles ni un servidor MCP adicional. Cada curso indica `area`,
 `areas` y `sourceId`. Los identificadores de Educación Continua se prefijan
 para que no colisionen con identificadores numéricos iguales del otro Moodle.
 `areaStates` informa si cada panel estuvo `available` o `unavailable`; un fallo
-del área secundaria no elimina los cursos regulares.
+del área secundaria no elimina los cursos regulares. Si Educación Continua
+falla, se aplica un enfriamiento temporal de 30 minutos para no repetir una
+navegación fallida en cada consulta; `retryUnavailableAreas: true` permite un
+reintento manual explícito.
+
+La sincronización completa sigue siendo el valor predeterminado. Para consultas
+específicas se admiten alcances generales y reutilizables: `catalog`,
+`materials`, `activities`, `announcements` y `grades`. Las consultas con
+`forceRefresh` eligen automáticamente el alcance pertinente. Por ejemplo, una
+búsqueda de materiales actualiza catálogos y páginas de curso, pero no abre
+detalles de tareas, foros de anuncios ni reportes de notas. El resultado del
+trabajo incluye componentes, tiempos por etapa y fallos sanitizados.
 
 La sincronización solo lee:
 
@@ -123,13 +134,12 @@ como trabajo asíncrono.
 La raíz por defecto es:
 
 ```text
-downloads\.UNI V2
+downloads\Paideia
 ```
 
-`PUCP_DOWNLOADS_DIR` puede señalar otra raíz, pero debe llamarse `.UNI V2`.
-Nunca se permite escribir fuera de la raíz permitida ni en una carpeta
-`SILABOS MD`. Se conservan los mapeos locales de
-cursos conocidos; un curso no mapeado usa `<curso>\PAIDEIA NUEVO`. Un destino
+`PUCP_DOWNLOADS_DIR` puede señalar cualquier raíz absoluta elegida por el
+usuario. Cada curso se organiza genéricamente como `<raíz>\<curso>\<sección>`;
+no existen mapeos personales ni nombres de carpetas especiales. Un destino
 explícito también queda confinado mediante la comprobación léxica y de
 `realpath` común.
 
@@ -140,7 +150,9 @@ ZIP/RAR/7z y texto; también se respeta un nombre indicado por
 `Content-Disposition`.
 
 Por defecto no se sobrescribe. El manifiesto persistente deduplica primero por
-URL de origen y después por tamaño más SHA-256. La descarga masiva exige un
+URL de origen y después por tamaño más SHA-256; si el archivo registrado fue
+eliminado, permite descargarlo nuevamente. Las páginas contenedoras sin archivos
+no dejan directorios vacíos. La descarga masiva exige un
 curso explícito, acepta filtros y omite archivos existentes por defecto.
 Cada archivo exitoso se incorpora al manifiesto mediante una transacción
 serializada y escritura atómica, por lo que un fallo posterior del lote no

@@ -4,7 +4,8 @@ import {
   mkdir,
   mkdtemp,
   readFile,
-  symlink
+  symlink,
+  writeFile
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -71,7 +72,7 @@ function fakePlaywright() {
 async function junctionFixture() {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "paideia-junction-"));
   const uniRoot = path.join(temporary, ".UNI V2");
-  const courseRoot = path.join(uniRoot, "SIMULACION", "PAIDEIA NUEVO");
+  const courseRoot = path.join(uniRoot, "SIMULACION");
   const outside = path.join(temporary, "outside");
   const sectionPath = path.join(courseRoot, "Semana 1");
   await mkdir(courseRoot, { recursive: true });
@@ -268,6 +269,118 @@ test("sync visits both Paideia areas with the same browser context", async () =>
     { area: "pregrado_posgrado", state: "available", courseCount: 0 },
     { area: "educacion_continua", state: "available", courseCount: 0 }
   ]);
+});
+
+test("component sync avoids unrelated Paideia course, detail, forum, and grade pages", async () => {
+  const dashboardHtml = await readFile(new URL("./fixtures/dashboard.html", import.meta.url), "utf8");
+  const courseHtml = await readFile(new URL("./fixtures/course.html", import.meta.url), "utf8");
+  const visited = [];
+  const makePage = () => {
+    let currentUrl = "about:blank";
+    return {
+      async goto(url) {
+        currentUrl = url;
+        visited.push(url);
+      },
+      url() { return currentUrl; },
+      locator() { return { async count() { return 0; } }; },
+      async content() {
+        if (/\/my\/courses\.php/.test(currentUrl)) return dashboardHtml;
+        if (/\/course\/view\.php/.test(currentUrl)) return courseHtml;
+        return "<html><body></body></html>";
+      },
+      async close() {}
+    };
+  };
+  const adapter = createLivePaideiaAdapter({
+    configLoader: async () => ({
+      user: "fixture-user",
+      pass: "fixture-pass",
+      baseUrl: "https://paideia.invalid",
+      continuingBaseUrl: "",
+      authHosts: ["pandora.pucp.edu.pe"],
+      chromePath: ""
+    }),
+    playwrightLoader: async () => ({
+      chromium: {
+        async launch() {
+          return {
+            async newContext() {
+              return {
+                async newPage() { return makePage(); },
+                async close() {}
+              };
+            },
+            async close() {}
+          };
+        }
+      }
+    })
+  });
+
+  const catalog = await adapter.sync({ components: ["catalog"] });
+  assert.equal(visited.filter((url) => /\/course\/view\.php/.test(url)).length, 0);
+  assert.deepEqual(catalog.coverage.components, ["catalog"]);
+
+  visited.length = 0;
+  const materials = await adapter.sync({ components: ["catalog", "course_content"] });
+  assert.equal(visited.filter((url) => /\/course\/view\.php/.test(url)).length, 2);
+  assert.equal(visited.some((url) => /\/mod\/(?:assign|quiz|forum)\//.test(url)), false);
+  assert.equal(visited.some((url) => /\/grade\/report\//.test(url)), false);
+  assert.deepEqual(materials.coverage.components, ["catalog", "course_content"]);
+});
+
+test("temporarily unavailable Educación Continua is not retried on every sync", async () => {
+  const visits = [];
+  const dashboard = '<body id="page-my-courses"><div data-region="course-content"></div></body>';
+  const makePage = () => {
+    let currentUrl = "about:blank";
+    return {
+      async goto(url) {
+        currentUrl = url;
+        visits.push(url);
+        if (url.includes("paideiaprogramas")) throw new Error("secondary unavailable");
+      },
+      url() { return currentUrl; },
+      locator() { return { async count() { return 0; } }; },
+      async content() { return dashboard; },
+      async close() {}
+    };
+  };
+  const adapter = createLivePaideiaAdapter({
+    epochNow: () => Date.parse("2026-08-21T12:00:00-05:00"),
+    continuingCooldownMs: 30 * 60 * 1000,
+    configLoader: async () => ({
+      user: "fixture-user",
+      pass: "fixture-pass",
+      baseUrl: "https://paideiacursos.pucp.edu.pe",
+      continuingBaseUrl: "https://paideiaprogramas.pucp.edu.pe",
+      authHosts: ["pandora.pucp.edu.pe"],
+      chromePath: ""
+    }),
+    playwrightLoader: async () => ({
+      chromium: {
+        async launch() {
+          return {
+            async newContext() {
+              return {
+                async newPage() { return makePage(); },
+                async close() {}
+              };
+            },
+            async close() {}
+          };
+        }
+      }
+    })
+  });
+
+  const first = await adapter.sync({ components: ["catalog"] });
+  const second = await adapter.sync({ components: ["catalog"] });
+
+  assert.equal(visits.filter((url) => url.includes("paideiaprogramas")).length, 1);
+  assert.equal(first.areaStates[1].state, "unavailable");
+  assert.equal(second.areaStates[1].reason, "cooldown");
 });
 
 test("single resource download rejects a final section junction escape before writing", async () => {
@@ -473,6 +586,120 @@ test("concurrent downloads merge manifest entries without lost updates", async (
       "https://paideia.invalid/pluginfile.php/1/two.pdf"
     ]
   );
+});
+
+test("a stale manifest URL entry does not prevent re-downloading a deleted file", async () => {
+  const paths = await junctionFixture();
+  const manifestPath = path.join(paths.uniRoot, "stale.json");
+  const sourceUrl = "https://paideia.invalid/pluginfile.php/1/restored.pdf";
+  await writeFile(manifestPath, JSON.stringify({
+    entries: [{
+      sourceUrl,
+      path: path.join(paths.courseRoot, "missing.pdf"),
+      size: 12,
+      sha256: "missing"
+    }]
+  }));
+  const adapter = adapterWithGet(async () => responseFixture({
+    url: sourceUrl,
+    headers: {
+      "content-type": "application/pdf",
+      "content-disposition": 'attachment; filename="restored.pdf"'
+    },
+    body: Buffer.from("%PDF restored")
+  }));
+
+  const result = await adapter.downloadResource({
+    resource: {
+      id: "restored",
+      courseId: "1",
+      course: "SIMULACIÓN",
+      section: "Safe",
+      type: "resource",
+      kind: "resource",
+      title: "Restored",
+      url: sourceUrl
+    },
+    destination: paths.courseRoot,
+    uniRoot: paths.uniRoot,
+    manifestPath,
+    overwrite: false,
+    skipExisting: true
+  });
+
+  assert.equal(result.downloaded.length, 1);
+  assert.equal(result.skipped.length, 0);
+});
+
+test("a non-downloadable wrapper does not leave empty course folders", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "paideia-empty-folder-"));
+  const courseRoot = path.join(root, "Course");
+  const makePage = () => {
+    let currentUrl = "about:blank";
+    return {
+      async goto(url) { currentUrl = url; },
+      url() { return currentUrl; },
+      locator() { return { async count() { return 0; } }; },
+      async evaluate() { return []; },
+      async close() {}
+    };
+  };
+  const adapter = createLivePaideiaAdapter({
+    configLoader: async () => ({
+      user: "fixture-user",
+      pass: "fixture-pass",
+      baseUrl: "https://paideia.invalid",
+      continuingBaseUrl: "",
+      authHosts: ["pandora.pucp.edu.pe"],
+      maxResponseBytes: 1024,
+      chromePath: ""
+    }),
+    playwrightLoader: async () => ({
+      chromium: {
+        async launch() {
+          return {
+            async newContext() {
+              return {
+                request: {
+                  async get() {
+                    return responseFixture({
+                      url: "https://paideia.invalid/mod/folder/view.php?id=1",
+                      headers: { "content-type": "text/html" },
+                      body: Buffer.from("<html></html>")
+                    });
+                  }
+                },
+                async newPage() { return makePage(); },
+                async close() {}
+              };
+            },
+            async close() {}
+          };
+        }
+      }
+    })
+  });
+
+  const result = await adapter.downloadResource({
+    resource: {
+      id: "folder-1",
+      courseId: "1",
+      course: "Course",
+      section: "Empty Section",
+      type: "folder",
+      kind: "folder",
+      title: "Empty folder",
+      url: "https://paideia.invalid/mod/folder/view.php?id=1"
+    },
+    destination: courseRoot,
+    uniRoot: root,
+    manifestPath: path.join(root, "manifest.json"),
+    overwrite: false,
+    skipExisting: true
+  });
+
+  assert.equal(result.skipped[0].reason, "non_downloadable_activity");
+  await assert.rejects(access(path.join(courseRoot, "Empty Section")));
 });
 
 test("bulk manifest retains successful entries when a later resource fails", async () => {

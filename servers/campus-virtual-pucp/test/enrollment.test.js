@@ -586,6 +586,87 @@ test("local schedule preferences merge with per-call overrides without mutating 
   assert.deepEqual(local, { freeDays: ["friday"], maxDays: 4, weights: { vacancySafety: 50 } });
 });
 
+test("schedule search retains only top results and reports deterministic truncation", () => {
+  const many = [];
+  const courseCodes = [];
+  for (let course = 0; course < 6; course += 1) {
+    const courseCode = `C${course}`;
+    courseCodes.push(courseCode);
+    for (let section = 0; section < 8; section += 1) {
+      many.push({
+        courseCode,
+        courseName: courseCode,
+        scheduleId: `${course}-${section}`,
+        capacity: { vacancies: 40, registrations: section },
+        sessions: []
+      });
+    }
+  }
+  const result = recommendCourseSchedules({
+    courseCodes,
+    offerings: many,
+    maxResults: 5,
+    searchLimits: { maxStates: 1_000 }
+  });
+  assert.equal(result.status, "partial");
+  assert.equal(result.recommendations.length, 5);
+  assert.equal(result.search.exhaustive, false);
+  assert.equal(result.search.exploredStates <= 1_000, true);
+  assert.equal(result.search.retained, 5);
+  assert.equal(result.search.limitReason, "state_budget");
+});
+
+test("maxDays is enforced and reported by evaluation", () => {
+  const threeDays = [
+    ["A100", "A1", "monday"],
+    ["B200", "B1", "tuesday"],
+    ["C300", "C1", "wednesday"]
+  ].map(([courseCode, scheduleId, day]) => ({
+    courseCode,
+    scheduleId,
+    sessions: [{ day, start: "08:00", end: "09:00", virtual: false }]
+  }));
+  const recommendation = recommendCourseSchedules({
+    courseCodes: ["A100", "B200", "C300"],
+    offerings: threeDays,
+    preferences: { maxDays: 2 }
+  });
+  assert.equal(recommendation.status, "no_valid_schedule");
+  assert.ok(recommendation.unsatisfiedConstraints.includes("max_days"));
+  const evaluation = evaluateCourseSchedule({
+    offerings: threeDays,
+    selections: threeDays.map(({ courseCode, scheduleId }) => ({ courseCode, scheduleId })),
+    preferences: { maxDays: 2 }
+  });
+  assert.equal(evaluation.valid, false);
+  assert.ok(evaluation.hardConstraintViolations.includes("max_days"));
+});
+
+test("preferred days and hybrid modality influence ranking", () => {
+  const preferredDay = recommendCourseSchedules({
+    courseCodes: ["A100"],
+    offerings: [
+      { courseCode: "A100", scheduleId: "MON", sessions: [{ day: "monday", start: "09:00", end: "10:00", virtual: false }] },
+      { courseCode: "A100", scheduleId: "TUE", sessions: [{ day: "tuesday", start: "09:00", end: "10:00", virtual: false }] }
+    ],
+    preferences: { preferredDays: ["tuesday"] }
+  });
+  assert.equal(preferredDay.recommendations[0].courses[0].scheduleId, "TUE");
+
+  const hybrid = recommendCourseSchedules({
+    courseCodes: ["B200"],
+    offerings: [
+      { courseCode: "B200", scheduleId: "P", sessions: [{ day: "monday", start: "10:00", end: "11:00", virtual: false }] },
+      { courseCode: "B200", scheduleId: "H", sessions: [
+        { day: "monday", start: "10:00", end: "11:00", virtual: false },
+        { day: "wednesday", start: "10:00", end: "11:00", virtual: true }
+      ] }
+    ],
+    preferences: { preferredModality: "hybrid" }
+  });
+  assert.equal(hybrid.recommendations[0].courses[0].scheduleId, "H");
+});
+
 test("portal parser exposes Matrícula extemporánea as read-only compatibility", () => {
   const html = `
     <nav data-enrollment-tabs><a href="#courses">Cursos y Horarios</a></nav>

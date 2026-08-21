@@ -17,7 +17,12 @@ no concluyas que el estudiante carece de cursos allí.
 
 Solicita `sync_paideia` solo si el usuario pide datos actuales o la caché está
 vencida. La sincronización devuelve un trabajo; consulta su resultado con
-`get_paideia_job_status`.
+`get_paideia_job_status`. Prefiere el alcance más pequeño que resuelva la
+consulta: `catalog`, `materials`, `activities`, `announcements` o `grades`;
+usa `full` cuando se necesite una actualización integral. Las consultas con
+`forceRefresh` ya seleccionan automáticamente el componente pertinente. Si
+Educación Continua está temporalmente inaccesible puede aparecer en `cooldown`;
+no fuerces reintentos repetidos salvo que el usuario pida comprobarla ahora.
 
 Descarga material únicamente si el usuario lo pide de forma explícita. Usa
 `download_paideia_resource` o `download_course_materials`; no habilites

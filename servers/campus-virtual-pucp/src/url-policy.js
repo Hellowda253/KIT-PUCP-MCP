@@ -97,6 +97,8 @@ const FINAL_GRADE_STATISTICS_PATH =
   "/pucp/estadist/eswnotfi/eswnotfi";
 const COURSE_SCHEDULE_SEARCH_PATH =
   "/pucp/horarios/howcurho/howcurho";
+const STUDENT_SCHEDULE_PATH =
+  "/pucp/horarios/howhorac/howhorac";
 const CROSS_UNIT_VACANCIES_PATH =
   "/pucp/horarios/howvacdi/howvacdi";
 const ALLOWED_COURSES_REPORT_PATH =
@@ -168,6 +170,32 @@ export function createCampusUrlPolicy({
     }
     if (url.href === agendaEntry.href || url.href === agendaJson.href) {
       return url;
+    }
+    if (url.pathname === STUDENT_SCHEDULE_PATH) {
+      const entries = [...url.searchParams];
+      const values = Object.fromEntries(entries);
+      const expected = [
+        "accion", "alumno", "cicloano", "ciclo", "tipociclo", "facultad",
+        "rama", "checkclases", "checkpra", "checklab", "checkexaotros",
+        "indicasesiones", "formatedlistacursos"
+      ];
+      const keys = new Set(entries.map(([key]) => key));
+      const valid =
+        entries.length === expected.length &&
+        keys.size === expected.length &&
+        expected.every((key) => keys.has(key)) &&
+        values.accion === "MostrarResultadosHorAcad" &&
+        /^\d{6,12}$/.test(values.alumno ?? "") &&
+        /^\d{4}$/.test(values.cicloano ?? "") &&
+        /^\d{2}$/.test(values.ciclo ?? "") &&
+        values.tipociclo === "00" &&
+        values.facultad === "" &&
+        values.rama === "" &&
+        ["checkclases", "checkpra", "checklab", "checkexaotros", "indicasesiones"]
+          .every((key) => values[key] === "1") &&
+        values.formatedlistacursos === "";
+      if (valid) return url;
+      throw policyError("Campus student schedule URL is not the exact read-only query");
     }
     if (
       url.pathname === ENROLLMENT_IMPEDIMENTS_PATH &&

@@ -1,9 +1,20 @@
 {
   "name": "sync_paideia",
-  "description": "Queue a headless, metadata-only refresh of Pregrado/Posgrado and Educación Continua. Never downloads files or opens quiz attempts.",
+  "description": "Queue a headless metadata refresh. Use a focused scope to avoid loading unrelated course pages; full remains the default. Never downloads files or opens quiz attempts.",
   "parameters": {
     "type": "object",
     "properties": {
+      "scope": {
+        "enum": [
+          "full",
+          "catalog",
+          "materials",
+          "activities",
+          "announcements",
+          "grades"
+        ],
+        "description": "Refresh all metadata or only the component needed for the current task."
+      },
       "courseConcurrency": {
         "type": "integer",
         "minimum": 1,
@@ -13,6 +24,10 @@
         "type": "integer",
         "minimum": 1,
         "maximum": 8
+      },
+      "retryUnavailableAreas": {
+        "type": "boolean",
+        "description": "Bypass the temporary Educación Continua cooldown for this explicit sync."
       }
     },
     "required": [],

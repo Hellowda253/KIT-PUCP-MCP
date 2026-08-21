@@ -47,7 +47,16 @@ inventes.
 
 ## Generación
 
-Desde la carpeta de esta skill ejecuta:
+Sigue este flujo cuando el estudiante pida el archivo:
+
+1. Obtén los cursos y todas sus sesiones desde Campus. Para el horario personal
+   usa `get_student_schedule`; para una opción recomendada parte del resultado
+   de `recommend_course_schedules` y consulta cualquier detalle faltante.
+2. Construye el JSON anterior. No copies otro HTML y no escribas uno desde cero.
+3. Separa varios docentes con ` / `; no concatenes sus nombres. Conserva los
+   nombres oficiales en el JSON. El renderizador crea etiquetas abreviadas y
+   evita mostrar los títulos completamente en mayúsculas.
+4. Desde la carpeta de esta skill ejecuta:
 
 ```powershell
 node scripts/render-schedule.mjs --data RUTA_DATOS.json --output RUTA_HORARIO.html --force
@@ -61,3 +70,10 @@ carriles usando solo las actividades visibles. No incluyas nombre, código de
 alumno, credenciales, cookies ni otros datos personales. Antes de entregar,
 confirma que los créditos y el número de cursos y sesiones coincidan con la
 selección consultada.
+
+Abre el HTML generado y verifica visualmente que aparezcan todos los cursos y
+sesiones; que cada sesión tenga tipo, hora, aula y docente cuando Campus los
+publique; y que clases, prácticas y exámenes no hayan sido fusionados. Los
+cruces deben aparecer lado a lado y el contenido completo debe revelarse al
+pasar el puntero o enfocar la tarjeta. Si falta información, vuelve a consultar
+Campus y regenera el archivo; no edites manualmente el HTML para ocultarlo.

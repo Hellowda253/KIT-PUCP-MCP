@@ -41,3 +41,28 @@ test("writeJsonAtomic rejects undefined JSON before creating any file", async (t
   );
   assert.deepEqual(await readdir(directory), []);
 });
+
+test("writeJsonAtomic retries transient Windows rename failures", async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "pucp-cache-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const cachePath = path.join(directory, "retry.json");
+  let attempts = 0;
+  const { rename } = await import("node:fs/promises");
+
+  await writeJsonAtomic(cachePath, { version: 3 }, {
+    retryDelays: [0, 0, 0],
+    async renameFile(source, destination) {
+      attempts += 1;
+      if (attempts < 3) {
+        const error = new Error("temporarily busy");
+        error.code = attempts === 1 ? "EPERM" : "EBUSY";
+        throw error;
+      }
+      return rename(source, destination);
+    }
+  });
+
+  assert.equal(attempts, 3);
+  assert.deepEqual(await readJsonCache(cachePath), { version: 3 });
+  assert.deepEqual(await readdir(directory), ["retry.json"]);
+});

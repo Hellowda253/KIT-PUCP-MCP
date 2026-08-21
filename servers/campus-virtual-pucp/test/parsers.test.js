@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   decodeAgendaPayload,
   parseLegacyAcademicTargets,
+  parseLegacyStudentScheduleHtml,
   parseLegacyFinancialHtml,
   parseLegacyHistoryHtml,
   parseLegacyObligationsHtml,
@@ -343,6 +344,37 @@ test("legacy course hub exposes ephemeral read targets without carrying the sess
   assert.equal(result.historyUrl.includes("never-cache-this"), false);
   assert.match(result.personalPanelUrl, /accion=AbrirPanel/);
   assert.equal(result.personalPanelUrl.includes("never-cache-this"), false);
+  assert.match(result.studentScheduleUrl, /howhorac\?accion=MostrarResultadosHorAcad/);
+  assert.equal(result.studentScheduleUrl.includes("never-cache-this"), false);
+});
+
+test("legacy student schedule grid merges adjacent hours and preserves overlaps", async () => {
+  const result = parseLegacyStudentScheduleHtml(
+    await fixture("legacy-student-schedule.html")
+  );
+
+  assert.equal(result.state, "available");
+  assert.equal(result.term, "2026-2");
+  assert.equal(result.items.length, 4);
+  assert.deepEqual(result.items[0], {
+    courseCode: "IND275",
+    courseName: "CONTROL DE GESTIÓN IND.",
+    term: "2026-2",
+    scheduleId: "0734",
+    scheduleType: "class",
+    rawScheduleType: "T",
+    section: "C",
+    day: "monday",
+    start: "08:00",
+    end: "10:00",
+    room: "A303",
+    modality: "in_person"
+  });
+  assert.deepEqual(
+    result.items.filter(({ day, start }) => day === "thursday" && start === "10:00")
+      .map(({ courseCode, scheduleType }) => [courseCode, scheduleType]),
+    [["1IND52", "practice"], ["1MEC10", "exam"]]
+  );
 });
 
 test("legacy partial-grade matrix becomes one explicitly non-official item per assessment", async () => {

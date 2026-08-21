@@ -24,7 +24,7 @@ test("cached document sensitivity selects fixed academic or private roots", () =
       category: "Programa analítico",
       sensitivity: "academic"
     }, roots),
-    path.join(roots.uniRoot, "Simulacion", "CAMPUS NUEVO")
+    path.join(roots.uniRoot, "Simulacion")
   );
   assert.equal(
     routeDocumentDestination({
@@ -40,7 +40,7 @@ test("cached document sensitivity selects fixed academic or private roots", () =
       category: "Sílabo",
       sensitivity: "academic"
     }, roots),
-    path.join(roots.uniRoot, "Campus Virtual", "CAMPUS NUEVO")
+    path.join(roots.uniRoot, "Campus Virtual")
   );
 });
 

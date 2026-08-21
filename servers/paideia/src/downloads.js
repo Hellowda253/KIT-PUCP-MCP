@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { resolveAllowedPath } from "@pucp-academic-mcp/common";
 
-import { safeName, searchableText } from "./text.js";
+import { safeName } from "./text.js";
 
 const EXTENSIONS = new Set([
   ".pdf", ".ppt", ".pptx", ".pps", ".ppsx", ".doc", ".docx",
@@ -122,70 +122,25 @@ export async function resolveSafeWritePath(candidate, uniRoot) {
   return resolved;
 }
 
-const mappings = [
-  [/fundamentos de la cadena de suministros/i, ["FUNDAMENTOS DE LA CADENA DE SUMINISTROS", "CLASES"]],
-  [/simulacion/i, ["SIMULACION", "PAIDEIA NUEVO"]],
-  [/analytics 2/i, ["ANALYTICS 2", "PAIDEIA NUEVO"]],
-  [/electricidad industrial/i, ["ELECTRICIDAD INDUSTRIAL", "PAIDEIA NUEVO"]],
-  [/ingenieria de materiales/i, ["INGENIERIA DE MATERIALES", "PAIDEIA NUEVO"]],
-  [/gestion del talento humano/i, ["GESTION DEL TALENTO HUMANO", "PAIDEIA NUEVO"]],
-  [/taller de procesos de manufactura/i, ["TALLER DE PROCESOS DE MANUFACTURA", "PAIDEIA NUEVO"]]
-];
-
-const sectionFolderCourses = [
-  /simulacion/i,
-  /analytics 2/i,
-  /electricidad industrial/i,
-  /ingenieria de materiales/i,
-  /gestion del talento humano/i,
-  /taller de procesos de manufactura/i
-];
-
 export function courseDestination(courseName, uniRoot) {
   const resolved = validateDownloadDestination(uniRoot, uniRoot);
-  const normalized = searchableText(courseName);
-  const mapped = mappings.find(([pattern]) => pattern.test(normalized))?.[1];
-  return path.join(resolved, ...(mapped ?? [safeName(courseName), "PAIDEIA NUEVO"]));
+  return path.join(resolved, safeName(courseName || "Curso"));
 }
 
 export function materialDestination(courseName, section, courseRoot) {
-  const normalizedCourse = searchableText(courseName);
-  const normalizedSection = searchableText(section);
-  if (/fundamentos de la cadena de suministros/i.test(normalizedCourse)) {
-    if (/^s06b\b/.test(normalizedSection)) return path.join(courseRoot, "S07");
-    const session = normalizedSection.match(/^s(\d{1,2})\b/);
-    return session
-      ? path.join(courseRoot, `S${String(Number(session[1])).padStart(2, "0")}`)
-      : courseRoot;
-  }
-  if (sectionFolderCourses.some((pattern) => pattern.test(normalizedCourse))) {
-    return path.join(courseRoot, safeName(section || "Sin seccion"));
-  }
-  return courseRoot;
+  return section ? path.join(courseRoot, safeName(section)) : courseRoot;
 }
 
 export function validateDownloadDestination(candidate, uniRoot) {
   const resolved = path.resolve(candidate);
   const root = path.resolve(uniRoot);
   const relative = path.relative(root, resolved);
-  if (path.basename(resolved).toLowerCase() !== ".uni v2") {
-    if (
-      relative === ".." ||
-      relative.startsWith(`..${path.sep}`) ||
-      path.isAbsolute(relative)
-    ) {
-      throw new Error("Unsafe Paideia destination outside .UNI V2");
-    }
-  }
-  if (path.basename(root).toLowerCase() !== ".uni v2") {
-    throw new Error("Unsafe Paideia destination root; expected .UNI V2");
-  }
   if (
-    resolved
-      .split(/[\\/]+/)
-      .some((segment) => segment.localeCompare("SILABOS MD", undefined, { sensitivity: "accent" }) === 0)
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
   ) {
-    throw new Error("SILABOS MD is never an allowed Paideia download destination");
+    throw new Error("Unsafe Paideia destination outside the configured download root");
   }
   return resolved;
 }
@@ -194,14 +149,21 @@ export function createDownloadManifest({ entries = [] } = {}) {
   const rows = [...entries];
   return {
     entries: rows,
-    has(candidate) {
-      return rows.some((entry) =>
+    find(candidate) {
+      return rows.find((entry) =>
         entry.sourceUrl === candidate.sourceUrl ||
         (candidate.size !== undefined &&
           candidate.sha256 &&
           entry.size === candidate.size &&
           entry.sha256 === candidate.sha256)
-      );
+      ) ?? null;
+    },
+    has(candidate) {
+      return Boolean(this.find(candidate));
+    },
+    remove(entry) {
+      const index = rows.indexOf(entry);
+      if (index >= 0) rows.splice(index, 1);
     },
     add(entry) {
       if (!this.has(entry)) rows.push(entry);

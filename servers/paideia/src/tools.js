@@ -33,10 +33,18 @@ export function createPaideiaTools(service) {
     },
     {
       name: "sync_paideia",
-      description: "Queue a headless, metadata-only refresh of Pregrado/Posgrado and Educación Continua. Never downloads files or opens quiz attempts.",
+      description: "Queue a headless metadata refresh. Use a focused scope to avoid loading unrelated course pages; full remains the default. Never downloads files or opens quiz attempts.",
       inputSchema: schema({
+        scope: {
+          enum: ["full", "catalog", "materials", "activities", "announcements", "grades"],
+          description: "Refresh all metadata or only the component needed for the current task."
+        },
         courseConcurrency: { type: "integer", minimum: 1, maximum: 6 },
-        detailConcurrency: { type: "integer", minimum: 1, maximum: 8 }
+        detailConcurrency: { type: "integer", minimum: 1, maximum: 8 },
+        retryUnavailableAreas: {
+          type: "boolean",
+          description: "Bypass the temporary Educación Continua cooldown for this explicit sync."
+        }
       }),
       handler: (args) => service.syncPaideia(args)
     },
@@ -148,7 +156,7 @@ export function createPaideiaTools(service) {
     },
     {
       name: "download_paideia_resource",
-      description: "Explicitly queue one cached Paideia file or folder download inside the safe .UNI V2 root.",
+      description: "Explicitly queue one cached Paideia file or folder download inside the configured safe download root.",
       inputSchema: schema({
         resource: { type: "string", minLength: 1 },
         destination: { type: "string", minLength: 1 },
