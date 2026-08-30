@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import { writeJsonAtomic } from "./json-cache.js";
@@ -73,11 +73,22 @@ export async function writeToolContracts(outputDirectory, tools) {
   }
   await mkdir(outputDirectory, { recursive: true });
   const contracts = buildToolContracts(tools);
+  const expectedFiles = new Set(contracts.map(({ fileName }) => fileName));
   for (const contract of contracts) {
     await writeJsonAtomic(
       path.join(outputDirectory, contract.fileName),
       contract.value
     );
   }
+  const entries = await readdir(outputDirectory, { withFileTypes: true });
+  await Promise.all(
+    entries
+      .filter((entry) =>
+        entry.isFile() &&
+        entry.name.endsWith(".json") &&
+        !expectedFiles.has(entry.name)
+      )
+      .map((entry) => unlink(path.join(outputDirectory, entry.name)))
+  );
   return contracts.map(({ fileName }) => path.join(outputDirectory, fileName));
 }

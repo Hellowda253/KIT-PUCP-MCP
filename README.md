@@ -4,6 +4,8 @@ Kit MCP comunitario y local para estudiantes de la
 Pontificia Universidad Católica del Perú. Integra Paideia, Campus Virtual PUCP
 y un resumen académico combinado para asistentes compatibles con MCP.
 
+Versión estable actual: **0.2.0**. Consulta el [historial de cambios](CHANGELOG.md).
+
 > Proyecto comunitario no oficial. No está afiliado, respaldado ni operado por
 > la PUCP. Cada estudiante ejecuta el servidor en su propio equipo y usa sus
 > propias credenciales.
@@ -30,7 +32,9 @@ permanecen bloqueados.
   entregas, avisos, calificaciones visibles y materiales descargables.
 - `campus_virtual_pucp`: agenda, cursos matriculados, notas, historia,
   rendimiento, currículo, matrícula, finanzas, trámites, documentos y
-  estadísticas institucionales de evaluaciones. El horario propio se lee del
+  estadísticas institucionales de evaluaciones. También consulta en vivo los
+  compañeros visibles en la pestaña `Alumnos` de cada curso, minimizando sus
+  datos y ocultando correos por defecto. El horario propio se lee del
   botón autenticado `Horario`. Durante una ventana de matrícula consulta
   “Inscríbete aquí” como fuente principal; cuando esa vista ya cerró va
   directamente al catálogo compartido de horarios, cuyos conteos pueden diferir
@@ -136,9 +140,9 @@ herramientas y límites:
 El repositorio incluye skills genéricas en [`skills/`](skills/) para orientar a
 Codex u otros agentes que soporten el formato `SKILL.md`:
 
-- `pucp-paideia`
-- `pucp-campus-virtual`
-- `pucp-academic-overview`
+- `pucp-academic`: una entrada única para información personal de Paideia,
+  Campus Virtual, matrícula, recomendaciones de horario y el horario HTML. Sus
+  referencias especializadas se cargan solo cuando la consulta las necesita.
 - `pucp-context`: selecciona fuentes oficiales para reglamentos, calendarios,
   trámites, servicios, bienestar, bibliotecas y oportunidades estudiantiles.
 - `profe-pucp`: tutoría, preparación de evaluaciones y mejora académica basada

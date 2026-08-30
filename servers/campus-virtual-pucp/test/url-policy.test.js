@@ -362,12 +362,46 @@ test("only the exact authenticated student schedule query is readable", () => {
   const exact =
     "https://eros.pucp.edu.pe/pucp/horarios/howhorac/howhorac?accion=MostrarResultadosHorAcad&alumno=20990001&cicloano=2026&ciclo=02&tipociclo=00&facultad=&rama=&checkclases=1&checkpra=1&checklab=1&checkexaotros=1&indicasesiones=1&formatedlistacursos=";
   assert.doesNotThrow(() => policy.assertRequest(exact));
+  assert.doesNotThrow(() => policy.assertSubresource(exact, "GET"));
   assert.throws(
     () => policy.assertRequest(`${exact}&confirmar=1`),
     (error) => error.code === "url_not_allowed"
   );
   assert.throws(
     () => policy.assertRequest(exact.replace("checkexaotros=1", "checkexaotros=0")),
+    (error) => error.code === "url_not_allowed"
+  );
+});
+
+test("course roster permits only the exact authenticated read query", () => {
+  const exact =
+    "https://eros.pucp.edu.pe/pucp/notas/nownotfi/nownotfi?accion=Abrir&vernotas=0&cicloano=2026&ciclo=02&tipociclo=00&clavecurso=IND270";
+  assert.doesNotThrow(() => policy.assertRequest(exact));
+  assert.doesNotThrow(() => policy.assertSubresource(exact, "GET"));
+  for (const candidate of [
+    `${exact}&alumno=20990001`,
+    exact.replace("accion=Abrir", "accion=EnviarMail"),
+    exact.replace("clavecurso=IND270", "clavecurso=IND270%26guardar%3D1"),
+    exact.replace("ciclo=02", "ciclo=2")
+  ]) {
+    assert.throws(
+      () => policy.assertRequest(candidate),
+      (error) => error.code === "url_not_allowed"
+    );
+  }
+});
+
+test("course hub permits only its captured empty read-only POST", () => {
+  const url = "https://eros.pucp.edu.pe/pucp/ocr/ocwmcurs/ocwmcurs?accion=Ingresar&persona=20990001&cicloAnoMatri=2026&cicloMatri=02&tipoCicloMatri=00&cicloAnoDict=&cicloDict=&tipoCicloDict=&panel=&sCicloAnoAdmCurso=&sCicloAdmCurso=&sTipoCicloAdmCurso=&sTipoCicloAdmEspeci=&esCambioPestana=1&sPestana=1&session=SAFE_SESSION_TOKEN.1234567890";
+  assert.doesNotThrow(() => policy.assertLegacyReadQuery(url, {
+    method: "POST",
+    body: ""
+  }));
+  assert.throws(
+    () => policy.assertLegacyReadQuery(`${url}&guardar=1`, {
+      method: "POST",
+      body: ""
+    }),
     (error) => error.code === "url_not_allowed"
   );
 });

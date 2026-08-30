@@ -18,7 +18,7 @@ export function createCampusVirtualServer(options = {}) {
   } = options;
   return createStdioMcpServer({
     name: "pucp-campus-virtual",
-    version: "0.1.0",
+    version: "0.2.0",
     tools: createCampusTools(service),
     ...transportOptions
   });

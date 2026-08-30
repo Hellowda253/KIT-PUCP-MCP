@@ -11,21 +11,18 @@ uso. No confirma la matrícula definitiva ni envía otros formularios.
 - `sync_campus_virtual`, `list_campus_modules`, `list_campus_changes`
 - `get_campus_agenda`, `get_campus_day`
 - `get_student_schedule`
-- `list_enrolled_courses`, `list_official_grades`
+- `list_enrolled_courses`, `list_course_participants`, `list_official_grades`
 - `get_partial_grade_statistics`, `get_final_grade_statistics`
 - `get_academic_history`, `get_academic_performance`
-- `get_curriculum_progress`, `get_enrollment_status`
-- `get_registration_portal_status`, `get_registration_status`
-- `list_schedule_scopes`
-- `get_enrollment_calendar`, `get_enrollment_impediments`
+- `get_curriculum_progress`, `get_enrollment_eligibility`
+- `get_registration_status`
 - `list_allowed_courses`, `search_course_schedules`
 - `search_historical_course_schedules`
-- `get_course_schedule_details`, `get_course_enrollment_statistics`
+- `get_course_schedule_details`
 - `list_cross_unit_vacancies`
 - `recommend_course_schedules`, `evaluate_course_schedule`
-- `get_schedule_preferences`
 - `prepare_course_registration`, `commit_course_registration`
-- `list_enrollment_portal_sections`, `get_enrollment_portal_section`
+- `get_enrollment_portal_section`
 - `get_financial_status` y `list_obligations` consultan importes, vencimientos,
   fechas de pago y estados. No existe ninguna herramienta para pagar, confirmar
   pagos ni modificar información financiera.
@@ -37,6 +34,13 @@ Todas las respuestas exitosas usan el sobre de cinco campos con
 datos académicos/notas y 48 horas para administración/documentos. Una consulta
 vencida o con `forceRefresh` devuelve el último caché bueno y el `jobId` de la
 actualización en segundo plano.
+
+`list_course_participants` abre en vivo la vista autenticada **Alumnos** de un
+curso visible para la cuenta. Puede limitarse a un horario y buscar por nombre
+o especialidad. Devuelve nombre, horario y especialidad; la columna de correo
+institucional solo aparece con `includeEmail: true`. No persiste el padrón en
+los cachés, no devuelve códigos de alumno y nunca activa “Enviar Mail” ni los
+formularios presentes en esa página.
 
 Durante la ventana activa de matrícula, horarios, vacantes y oferta usan un TTL
 de 5 minutos; cursos permitidos e impedimentos, 15 minutos. Fuera de esa
@@ -54,8 +58,41 @@ aparezca no prueba que el alumno pueda llevarlo: debe contrastarse con
 `get_registration_status` consulta en vivo `BuscarCursosInscritos` y conserva
 la `Posic. Relat.` exacta del horario principal. Los horarios asociados que no
 tienen una posición independiente se marcan `not_applicable`.
-`get_course_enrollment_statistics` usa la misma posición viva para
-`capacity.userPosition` antes de calcular el riesgo.
+`get_course_schedule_details` reúne sesiones, docentes, aulas, capacidad y
+riesgo; usa la misma posición viva para `capacity.userPosition` cuando la vista
+de inscripción está disponible y recurre a evidencia del catálogo cuando no.
+Si se omite `schedule`, devuelve todas las secciones encontradas del curso con
+su capacidad y riesgo; si se proporciona, limita la respuesta a esa sección y
+sus horarios vinculados.
+
+`get_enrollment_eligibility` consolida ciclo, turno, estado del portal,
+calendario, impedimentos y cantidad de cursos permitidos. El detalle completo
+de estos últimos permanece en `list_allowed_courses` para evitar respuestas
+innecesariamente grandes. Cada componente conserva su propio estado y fecha:
+si una vista no está disponible, el resumen sigue entregando las demás y marca
+la elegibilidad como `partial` en vez de ocultarlas.
+
+## Migración de la superficie pública
+
+La interfaz de matrícula se consolidó para reducir herramientas redundantes sin
+eliminar los extractores internos:
+
+- estado general, calendario e impedimentos se consultan con
+  `get_enrollment_eligibility`;
+- turno, resumen, cursos inscritos y posición relativa se consultan con
+  `get_registration_status`;
+- estadísticas de una sección o de todas las secciones de un curso se consultan
+  con `get_course_schedule_details`;
+- facultades y especialidades se resuelven dentro de
+  `search_course_schedules`, a partir de sus nombres visibles;
+- las preferencias efectivas aparecen en las respuestas de recomendación y
+  evaluación, incluso cuando no existe una combinación válida;
+- las secciones secundarias se abren directamente con
+  `get_enrollment_portal_section`.
+
+Los nombres públicos anteriores de esas consultas dejaron de anunciarse en
+`tools/list`. Los contratos generados eliminan automáticamente sus archivos
+JSON obsoletos para que Codex, Antigravity y Claude reciban la misma interfaz.
 
 ## Matrícula y recomendación de horarios
 

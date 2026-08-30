@@ -13,6 +13,7 @@ import {
   parseLegacyHistoryHtml,
   parseLegacyPartialGradesHtml,
   parseLegacyStudentScheduleHtml,
+  parseCourseParticipantsHtml,
   parseModuleHtml,
   parsePortalModules
 } from "./parsers.js";
@@ -60,6 +61,41 @@ export async function prepareScheduleScopeCatalog({
     return postCatalog(catalogForm);
   }
   return entryHtml;
+}
+
+export async function readVisibleCourseLinks(page) {
+  const selector =
+    'a[href*="PanelCursoPersonaCiclo"], a[onclick*="PanelCursoPersonaCiclo"]';
+  await page.waitForFunction(
+    (courseSelector) => document.querySelectorAll(courseSelector).length > 0,
+    selector,
+    { timeout: 45_000 }
+  );
+  const candidates = await page.locator(selector).evaluateAll((nodes) =>
+    nodes.map((node, index) => ({
+      index,
+      label: (node.textContent ?? "").replace(/\s+/g, " ").trim(),
+      rowText: (node.closest("tr")?.textContent ?? node.textContent ?? "")
+        .replace(/\s+/g, " ")
+        .trim(),
+      navigation: `${node.getAttribute("href") ?? ""} ${node.getAttribute("onclick") ?? ""}`
+    }))
+  );
+  const unique = new Map();
+  for (const candidate of candidates) {
+    const key = candidate.navigation || candidate.rowText;
+    const existing = unique.get(key);
+    if (!existing || candidate.label.length > existing.label.length) {
+      unique.set(key, candidate);
+    }
+  }
+  return [...unique.values()];
+}
+
+export async function waitForStudentsLink(page) {
+  const link = page.getByText("Alumnos", { exact: true }).first();
+  await link.waitFor({ state: "visible", timeout: 45_000 });
+  return link;
 }
 
 const MODULE_KEYS = [
@@ -817,6 +853,103 @@ async function createPlaywrightSession({ config, policy }) {
     }
   }
 
+  async function queryCourseParticipants({ course }) {
+    const requested = cleanText(course);
+    if (!requested) {
+      throw adapterError("course_not_found", "A visible Campus course is required");
+    }
+    const hubUrl = new URL(
+      "/pucp/ocr/ocwmcurs/ocwmcurs?accion=Ingresar",
+      config.portalUrl
+    ).href;
+    policy.assertRequest(hubUrl);
+    const rosterPage = await context.newPage();
+    try {
+      await rosterPage.goto(hubUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 45_000
+      });
+      policy.assertFinalUrl(rosterPage.url());
+      const courseLinks = rosterPage.locator(
+        'a[href*="PanelCursoPersonaCiclo"], a[onclick*="PanelCursoPersonaCiclo"]'
+      );
+      let candidates;
+      try {
+        candidates = await readVisibleCourseLinks(rosterPage);
+      } catch (cause) {
+        const error = adapterError(
+          "course_list_unavailable",
+          "The authenticated Campus course list did not finish loading"
+        );
+        error.stage = "course_participants.course_list";
+        throw error;
+      }
+      const needle = searchableText(requested);
+      const exactCode = /^[A-Za-z0-9-]{3,15}$/.test(requested)
+        ? requested.toUpperCase()
+        : "";
+      let matches = candidates.filter((candidate) => {
+        const row = searchableText(candidate.rowText);
+        const navigation = searchableText(candidate.navigation);
+        if (exactCode) {
+          const tokenPattern = new RegExp(`(?:^|[^a-z0-9-])${exactCode.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^a-z0-9-])`);
+          return tokenPattern.test(row) || tokenPattern.test(navigation);
+        }
+        return row.includes(needle) || searchableText(candidate.label).includes(needle);
+      });
+      if (matches.length === 0) {
+        throw adapterError(
+          "course_not_found",
+          "The requested course is not visible in the authenticated Campus course list"
+        );
+      }
+      if (matches.length > 1) {
+        throw adapterError(
+          "course_ambiguous",
+          "More than one visible Campus course matches the request; use its course code"
+        );
+      }
+      const selected = matches[0];
+      const hubText = await rosterPage.locator("body").innerText().catch(() => "");
+      const termMatch = cleanText(hubText).match(/ciclo\s+(\d{4})-(\d{1,2})/i);
+      await Promise.all([
+        rosterPage.waitForLoadState("domcontentloaded", { timeout: 45_000 }).catch(() => null),
+        courseLinks.nth(selected.index).click()
+      ]);
+      let studentsLink;
+      try {
+        studentsLink = await waitForStudentsLink(rosterPage);
+      } catch (cause) {
+        throw adapterError(
+          "course_roster_unavailable",
+          "The Alumnos view is not visible for the requested Campus course"
+        );
+      }
+      await Promise.all([
+        rosterPage.waitForURL(/\/pucp\/notas\/nownotfi\/nownotfi/i, {
+          timeout: 45_000,
+          waitUntil: "domcontentloaded"
+        }),
+        studentsLink.click()
+      ]);
+      const finalUrl = rosterPage.url();
+      policy.assertFinalUrl(finalUrl);
+      const safeUrl = new URL(sanitizedPageUrl(finalUrl));
+      const courseCode = safeUrl.searchParams.get("clavecurso") || exactCode;
+      return {
+        url: safeUrl.href,
+        html: await readStablePageContent(rosterPage),
+        courseCode,
+        courseName: selected.label,
+        term: termMatch
+          ? `${termMatch[1]}-${Number(termMatch[2])}`
+          : ""
+      };
+    } finally {
+      await rosterPage.close().catch(() => {});
+    }
+  }
+
   async function registrationView({ reload = false } = {}) {
     const entryUrl = new URL(
       "/pucp/prematri/pmwmatrc/pmwmatrc?accion=MostrarInscripcion",
@@ -1112,6 +1245,7 @@ async function createPlaywrightSession({ config, policy }) {
     queryAllowedCourses,
     queryEnrollmentImpediments,
     queryCrossUnitVacancies,
+    queryCourseParticipants,
     queryRegistrationWorkspace,
     commitRegistrationChange,
     queryLegacyReadPage,
@@ -1954,7 +2088,7 @@ export function createLiveCampusAdapter({
     ) {
       throw adapterError("mutation_refused", "Current schedules must use read-only Campus sources");
     }
-    const catalogFallback = async () => {
+    const catalogFallback = async (reason = "") => {
       if (!/^\d{4}-\d{1,2}$/.test(String(options.term ?? ""))) {
         throw adapterError(
           "current_term_unavailable",
@@ -1970,7 +2104,9 @@ export function createLiveCampusAdapter({
         sourcesUsed: ["schedule_catalog"],
         differences: [],
         warnings: [
-          "The registration view is unavailable; schedule catalog counts can differ from enrollment-time values."
+          reason === "schedule_scope_not_found"
+            ? "The requested academic scope is unavailable in the enrollment view; the current-term schedule catalog was used and enrollment-only counts or personal position may be unavailable."
+            : "The registration view is unavailable; schedule catalog counts can differ from enrollment-time values."
         ],
         retrievedAt: fallback.retrievedAt ?? now()
       };
@@ -1986,12 +2122,13 @@ export function createLiveCampusAdapter({
       const fallbackCodes = new Set([
         "registration_portal_not_visible",
         "registration_portal_unavailable",
+        "schedule_scope_not_found",
         "unsupported_layout",
         "scrape_failed",
         "timeout"
       ]);
       if (!fallbackCodes.has(code)) throw error;
-      return catalogFallback();
+      return catalogFallback(code);
     }
     const wanted = new Set((options.courseCodes ?? []).map((code) => String(code).trim().toUpperCase()));
     let items = (workspace.offerings ?? []).filter((item) =>
@@ -2132,11 +2269,51 @@ export function createLiveCampusAdapter({
     }, { entryUrl: (config) => config.portalUrl });
   }
 
+  async function getCourseParticipants(options = {}) {
+    if (
+      options.metadataOnly !== true ||
+      options.allowDownloads !== false ||
+      options.allowMutations !== false
+    ) {
+      throw adapterError(
+        "mutation_refused",
+        "Campus participant lookup is restricted to the authenticated read-only roster"
+      );
+    }
+    return withSession(async ({ policy, session }) => {
+      if (typeof session.queryCourseParticipants !== "function") {
+        throw adapterError(
+          "course_roster_unavailable",
+          "The Campus participant roster reader is unavailable"
+        );
+      }
+      const response = await session.queryCourseParticipants({
+        course: options.course
+      });
+      policy.assertFinalUrl(response.url);
+      const parsed = parseCourseParticipantsHtml(response.html, options);
+      if (parsed.state !== "available") {
+        throw adapterError(
+          "unsupported_layout",
+          "The Campus course participant table layout was not recognized"
+        );
+      }
+      return {
+        ...parsed,
+        courseCode: response.courseCode,
+        courseName: response.courseName,
+        term: response.term,
+        retrievedAt: now()
+      };
+    }, { entryUrl: (config) => config.portalUrl });
+  }
+
   return {
     downloadDocument,
     getFinalGradeStatistics: (reference) =>
       queryGradeStatistics(reference, "final"),
     getAllowedCourses,
+    getCourseParticipants,
     getPartialGradeStatistics: (reference) =>
       queryGradeStatistics(reference, "partial"),
     readRegistrationWorkspace,

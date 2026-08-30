@@ -149,7 +149,7 @@ export function createCampusTools(service) {
     },
     {
       name: "get_campus_agenda",
-      description: "Query cached Campus agenda events by inclusive date range, course, or comma-separated kinds.",
+      description: "Query confirmed Campus agenda events by inclusive date range, course, or comma-separated kinds. Use this for the next class or dated events; if one day is empty, widen the range instead of substituting the recurring weekly schedule.",
       inputSchema: schema({
         start: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
         end: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
@@ -162,7 +162,7 @@ export function createCampusTools(service) {
     },
     {
       name: "get_campus_day",
-      description: "Return cached Campus agenda events for one YYYY-MM-DD date.",
+      description: "Return confirmed Campus agenda events for one specific calendar date (YYYY-MM-DD). An empty result means no confirmed agenda event for that date; do not infer one from the recurring weekly schedule.",
       inputSchema: schema({
         date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
         course: { type: "string", minLength: 1 },
@@ -177,6 +177,27 @@ export function createCampusTools(service) {
       description: "List the authenticated student's normalized cached enrolled courses.",
       inputSchema: schema(commonFilters),
       handler: (args) => service.listEnrolledCourses(args)
+    },
+    {
+      name: "list_course_participants",
+      description: "List students visible in the authenticated Campus course Alumnos view. Returns names, schedules, and specialties; institutional email is omitted unless includeEmail is explicitly true. Never sends mail or submits roster forms.",
+      inputSchema: schema({
+        course: {
+          type: "string",
+          minLength: 1,
+          maxLength: 120,
+          description: "Visible enrolled course code or an unambiguous course name. Prefer the course code."
+        },
+        schedule: { type: "string", minLength: 1, maxLength: 15 },
+        query: { type: "string", minLength: 1, maxLength: 120 },
+        includeEmail: {
+          type: "boolean",
+          default: false,
+          description: "Include the E-mail column only when the user needs it explicitly."
+        },
+        limit: { type: "integer", minimum: 1, maximum: 200 }
+      }, ["course"]),
+      handler: (args) => service.listCourseParticipants(args)
     },
     {
       name: "list_official_grades",
@@ -231,46 +252,22 @@ export function createCampusTools(service) {
       handler: (args) => service.getCurriculumProgress(args)
     },
     {
-      name: "get_enrollment_status",
-      description: "Return cached read-only enrollment eligibility/status; never changes enrollment.",
+      name: "get_enrollment_eligibility",
+      description: "Return one cohesive read-only enrollment eligibility overview with active term, turn, portal state, calendar, impediments, and permitted-course count.",
       inputSchema: schema(refresh),
-      handler: (args) => service.getEnrollmentStatus(args)
+      handler: (args) => service.getEnrollmentEligibility(args)
     },
     {
       name: "get_student_schedule",
-      description: "Return the authenticated student's own active weekly schedule from the Campus Horario button, including classes, practices, laboratories, exams, rooms, and overlaps.",
+      description: "Return the authenticated student's own recurring weekly pattern from the Campus Horario button, including classes, practices, laboratories, exams, rooms, and overlaps. It describes the usual timetable but does not confirm that a session occurs on a specific calendar date; use Campus agenda for today or the next class.",
       inputSchema: schema(refresh),
       handler: (args) => service.getStudentSchedule(args)
-    },
-    {
-      name: "get_registration_portal_status",
-      description: "Read the live active-registration view status, mode (regular or extemporaneous), term, enrollment turn, and course/credit totals without exposing identity or session fields.",
-      inputSchema: schema(refresh),
-      handler: (args) => service.getRegistrationPortalStatus(args)
     },
     {
       name: "get_registration_status",
       description: "Read live registered or prematriculated courses, statuses, and personal relative positions from the active regular or structurally compatible extemporaneous view.",
       inputSchema: schema(refresh),
       handler: (args) => service.getRegistrationStatus(args)
-    },
-    {
-      name: "list_schedule_scopes",
-      description: "List the faculties and specialties exposed by the live registration view while that view is available.",
-      inputSchema: schema(refresh),
-      handler: (args) => service.listScheduleScopes(args)
-    },
-    {
-      name: "get_enrollment_calendar",
-      description: "Return cached enrollment dates, windows, temporary closures, deadlines, and downloadable official calendar metadata.",
-      inputSchema: schema({ term: enrollmentTerm, ...refresh }),
-      handler: (args) => service.getEnrollmentCalendar(args)
-    },
-    {
-      name: "get_enrollment_impediments",
-      description: "Return cached read-only enrollment impediments and eligibility warnings; never resolves or submits them.",
-      inputSchema: schema({ term: enrollmentTerm, ...refresh }),
-      handler: (args) => service.getEnrollmentImpediments(args)
     },
     {
       name: "list_allowed_courses",
@@ -280,7 +277,7 @@ export function createCampusTools(service) {
     },
     {
       name: "search_course_schedules",
-      description: "Search the active term using the live registration view when available and otherwise the shared PUCP schedule catalog; never accepts a term or uses historical data.",
+      description: "Search the active term using the live registration view when available and otherwise the shared PUCP schedule catalog; never accepts a term or uses historical data. For courses from other academic units in the active term, keep using this tool: it automatically falls back to the schedule catalog when the personalized enrollment scope cannot represent them. A schedule id or code such as 0721 does not determine curriculum level. Use only the explicit Campus level: a positive level identifies its mandatory courses and Nivel 0 identifies electives; if absent, report the classification as unknown.",
       inputSchema: schema({
         courseCodes: { ...courseCodes, maxItems: 30 },
         courseName: { type: "string", maxLength: 120 },
@@ -289,7 +286,7 @@ export function createCampusTools(service) {
           properties: {
             academicUnit: { type: "string", minLength: 1, maxLength: 120 },
             specialty: { type: "string", maxLength: 120 },
-            curriculumLevel: { type: "integer", minimum: 0, maximum: 30, description: "Official curriculum level shown by Campus; Nivel 0 contains Cursos Electivos. Requires specialty and is never inferred from course codes." }
+            curriculumLevel: { type: "integer", minimum: 0, maximum: 30, description: "Official curriculum level shown by Campus. A positive level identifies mandatory courses of that level; Nivel 0 contains Cursos Electivos. Requires specialty and is never inferred from a course or schedule code." }
           },
           required: ["academicUnit"],
           additionalProperties: false
@@ -302,7 +299,7 @@ export function createCampusTools(service) {
     },
     {
       name: "search_historical_course_schedules",
-      description: "Search the shared PUCP schedule catalog for an explicitly requested historical term; results are never used for active enrollment or registration writes.",
+      description: "Search the shared PUCP schedule catalog for an explicitly requested historical term; results are never used for active enrollment or registration writes. Classify mandatory courses and electives only from the explicit Campus curriculum level, never from a schedule id such as 0721.",
       inputSchema: schema({
         term: enrollmentTerm,
         courseCodes: { ...courseCodes, maxItems: 30 },
@@ -311,7 +308,7 @@ export function createCampusTools(service) {
           properties: {
             academicUnit: { type: "string", minLength: 1, maxLength: 120 },
             specialty: { type: "string", maxLength: 120 },
-            curriculumLevel: { type: "integer", minimum: 0, maximum: 30, description: "Official curriculum level shown by the historical report; Nivel 0 contains Cursos Electivos." }
+            curriculumLevel: { type: "integer", minimum: 0, maximum: 30, description: "Official curriculum level shown by the historical report. A positive level identifies mandatory courses of that level; Nivel 0 contains Cursos Electivos; schedule ids do not define the level." }
           },
           required: ["academicUnit"],
           additionalProperties: false
@@ -324,15 +321,9 @@ export function createCampusTools(service) {
     },
     {
       name: "get_course_schedule_details",
-      description: "Return one active-term course schedule with linked sessions, professor, rooms, modality, survey, and capacity evidence.",
-      inputSchema: schema({ course: courseCode, schedule: { type: "string", minLength: 1, maxLength: 15 }, ...refresh }, ["course", "schedule"]),
+      description: "Return one or all active-term sections of a course with linked sessions, professors, rooms, modality, survey, live-or-cached capacity, personal position when published, and explained risk.",
+      inputSchema: schema({ course: courseCode, schedule: { type: "string", minLength: 1, maxLength: 15 }, ...refresh }, ["course"]),
       handler: (args) => service.getCourseScheduleDetails(args)
-    },
-    {
-      name: "get_course_enrollment_statistics",
-      description: "Return active-term capacity, registrations, enrollment, personal position when published, and an explained non-guaranteed risk level.",
-      inputSchema: schema({ course: courseCode, schedule: { type: "string", maxLength: 15 }, ...refresh }, ["course"]),
-      handler: (args) => service.getCourseEnrollmentStatistics(args)
     },
     {
       name: "list_cross_unit_vacancies",
@@ -366,12 +357,6 @@ export function createCampusTools(service) {
       handler: (args) => service.evaluateCourseSchedule(args)
     },
     {
-      name: "get_schedule_preferences",
-      description: "Return effective default and optional private local schedule preferences without exposing credentials.",
-      inputSchema: schema(),
-      handler: () => service.getSchedulePreferences()
-    },
-    {
       name: "prepare_course_registration",
       description: "In verified regular enrollment only, prepare an exact live add/remove registration diff and a five-minute one-use token; this tool never writes to Campus and its result must be shown for explicit confirmation.",
       inputSchema: schema({
@@ -388,12 +373,6 @@ export function createCampusTools(service) {
         confirmed: { type: "boolean" }
       }, ["confirmationToken", "confirmed"]),
       handler: (args) => service.commitCourseRegistration(args)
-    },
-    {
-      name: "list_enrollment_portal_sections",
-      description: "List all cached enrollment portal tabs, read-only actions, and permanently blocked mutation actions.",
-      inputSchema: schema(refresh),
-      handler: (args) => service.listEnrollmentPortalSections(args)
     },
     {
       name: "get_enrollment_portal_section",

@@ -1,0 +1,39 @@
+{
+  "name": "list_course_participants",
+  "description": "List students visible in the authenticated Campus course Alumnos view. Returns names, schedules, and specialties; institutional email is omitted unless includeEmail is explicitly true. Never sends mail or submits roster forms.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "course": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120,
+        "description": "Visible enrolled course code or an unambiguous course name. Prefer the course code."
+      },
+      "schedule": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 15
+      },
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120
+      },
+      "includeEmail": {
+        "type": "boolean",
+        "default": false,
+        "description": "Include the E-mail column only when the user needs it explicitly."
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 200
+      }
+    },
+    "required": [
+      "course"
+    ],
+    "additionalProperties": false
+  }
+}

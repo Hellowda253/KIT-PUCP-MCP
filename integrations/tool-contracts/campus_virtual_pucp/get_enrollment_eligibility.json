@@ -1,6 +1,6 @@
 {
-  "name": "get_enrollment_status",
-  "description": "Return cached read-only enrollment eligibility/status; never changes enrollment.",
+  "name": "get_enrollment_eligibility",
+  "description": "Return one cohesive read-only enrollment eligibility overview with active term, turn, portal state, calendar, impediments, and permitted-course count.",
   "parameters": {
     "type": "object",
     "properties": {

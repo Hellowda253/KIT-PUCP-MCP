@@ -6,7 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
-const skillRoot = path.join(root, "skills", "pucp-campus-virtual");
+const skillRoot = path.join(root, "skills", "pucp-academic");
 const templatePath = path.join(skillRoot, "assets", "horario-pucp.html");
 const rendererPath = path.join(skillRoot, "scripts", "render-schedule.mjs");
 const layoutPath = path.join(skillRoot, "scripts", "schedule-layout.mjs");
@@ -21,7 +21,7 @@ async function exists(file) {
   }
 }
 
-test("Campus skill bundles one UTF-8 responsive and printable schedule template", async () => {
+test("PUCP Academic bundles one UTF-8 responsive and printable schedule template", async () => {
   assert.equal(await exists(templatePath), true, "schedule template must exist");
   const html = await readFile(templatePath, "utf8");
 
@@ -40,7 +40,6 @@ test("Campus skill bundles one UTF-8 responsive and printable schedule template"
   assert.ok(scripts.length > 0, "template must contain its standalone renderer");
   for (const script of scripts) new Function(script);
 });
-
 test("schedule layout assigns horizontal lanes to every overlapping activity", async () => {
   assert.equal(await exists(layoutPath), true, "schedule layout module must exist");
   const { layoutDaySessions } = await import(pathToFileURL(layoutPath));
@@ -105,13 +104,141 @@ test("print layout keeps the desktop timetable visible and vertically aligned", 
   const html = await readFile(templatePath, "utf8");
   const printBlock = html.match(/@media print\s*{([\s\S]*?)\n\s*}\n\s*<\/style>/)?.[1] ?? "";
 
-  assert.match(printBlock, /:root\s*{\s*--hour-height:\s*30px;/);
+  assert.match(printBlock, /:root\s*{\s*--hour-height:\s*38px;/);
   assert.match(printBlock, /\.timetable-card\s*{[^}]*display:\s*block\s*!important;/s);
+  assert.match(printBlock, /\.event-content\s*{[^}]*padding:\s*2px 4px;/s);
+  assert.match(printBlock, /\.event-title\s*{[^}]*-webkit-line-clamp:\s*2;/s);
+  assert.match(printBlock, /\.event-details\s*{[^}]*-webkit-line-clamp:\s*2;/s);
+  assert.match(printBlock, /\.event-box\.event-short\s+\.event-details\s*{[^}]*-webkit-line-clamp:\s*1;/s);
   assert.doesNotMatch(html, /const HOUR_HEIGHT\s*=/);
   assert.match(html, /const topPercent\s*=/);
   assert.match(html, /const heightPercent\s*=/);
   assert.match(html, /event\.style\.top\s*=\s*`calc\(\$\{topPercent\}% \+ 2px\)`/);
   assert.match(html, /event\.style\.height\s*=\s*`calc\(\$\{heightPercent\}% - 4px\)`/);
+});
+
+test("schedule renderer rejects courses whose declared exams are missing from sessions", async () => {
+  const { renderScheduleTemplate } = await import(pathToFileURL(rendererPath));
+  const outputDir = await mkdtemp(path.join(tmpdir(), "pucp-schedule-missing-exam-"));
+  const outputPath = path.join(outputDir, "horario.html");
+  const data = {
+    term: "2026-1",
+    credits: 4,
+    courses: [{
+      code: "1ECO18",
+      name: "Economía Pública",
+      credits: 4,
+      scheduleId: "0721",
+      instructor: "Barrantes, Roxana",
+      classes: "Lun 08:00–10:00",
+      practice: "—",
+      exams: "Lun 08:00–10:00"
+    }],
+    sessions: [{
+      day: 1,
+      start: "08:00",
+      end: "10:00",
+      type: "class",
+      courseCodes: ["1ECO18"],
+      scheduleId: "0721",
+      title: "Economía Pública",
+      room: "J210",
+      instructor: "Barrantes, Roxana"
+    }]
+  };
+
+  try {
+    await assert.rejects(
+      renderScheduleTemplate({ templatePath, outputPath, data }),
+      /missing official exam sessions.*1ECO18.*get_course_schedule_details.*do not replace.*exams.*-/is
+    );
+    assert.equal(await exists(outputPath), false, "an incomplete schedule must not be written");
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
+});
+
+test("schedule renderer refuses an empty exams shortcut without an explicit official status", async () => {
+  const { renderScheduleTemplate } = await import(pathToFileURL(rendererPath));
+  const outputDir = await mkdtemp(path.join(tmpdir(), "pucp-schedule-exam-shortcut-"));
+  const outputPath = path.join(outputDir, "horario.html");
+  const data = {
+    term: "2026-2",
+    credits: 4,
+    courses: [{
+      code: "1IND52",
+      name: "Diseño de la Cadena de Suministros y Operaciones",
+      credits: 4,
+      scheduleId: "0732",
+      instructor: "Docente",
+      classes: "Lun 10:00–13:00",
+      practice: "—",
+      exams: "-"
+    }],
+    sessions: [{
+      day: 1,
+      start: "10:00",
+      end: "13:00",
+      type: "class",
+      courseCodes: ["1IND52"]
+    }]
+  };
+
+  try {
+    await assert.rejects(
+      renderScheduleTemplate({ templatePath, outputPath, data }),
+      /examStatus.*required.*1IND52.*not_published.*Campus/is
+    );
+    assert.equal(await exists(outputPath), false);
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
+});
+
+test("schedule renderer distinguishes confirmed not-published exams from unknown data", async () => {
+  const { renderScheduleTemplate } = await import(pathToFileURL(rendererPath));
+  const outputDir = await mkdtemp(path.join(tmpdir(), "pucp-schedule-exam-status-"));
+  const outputPath = path.join(outputDir, "horario.html");
+  const base = {
+    term: "2026-2",
+    credits: 3.5,
+    courses: [{
+      code: "MAT101",
+      name: "Cálculo",
+      credits: 3.5,
+      scheduleId: "0101",
+      instructor: "Docente",
+      classes: "Lun 08:00–10:00",
+      practice: "—",
+      exams: "—",
+      examStatus: "not_published"
+    }],
+    sessions: [{
+      day: 1,
+      start: "08:00",
+      end: "10:00",
+      type: "class",
+      courseCodes: ["MAT101"]
+    }]
+  };
+
+  try {
+    await renderScheduleTemplate({ templatePath, outputPath, data: base });
+    assert.equal(await exists(outputPath), true);
+    await assert.rejects(
+      renderScheduleTemplate({
+        templatePath,
+        outputPath,
+        data: {
+          ...base,
+          courses: [{ ...base.courses[0], examStatus: "unknown" }]
+        }
+      }),
+      /exam information is unknown.*MAT101.*get_course_schedule_details/is
+    );
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
 });
 
 test("desktop events expand on hover or keyboard focus and obscure only crossed peers", async () => {
@@ -124,6 +251,7 @@ test("desktop events expand on hover or keyboard focus and obscure only crossed 
   assert.match(html, /function clearEventFocus\(dayColumn\)/);
   assert.match(html, /event\.dataset\.startMinutes\s*=\s*String\(start\)/);
   assert.match(html, /event\.dataset\.endMinutes\s*=\s*String\(end\)/);
+  assert.match(html, /event\.classList\.toggle\("event-short",\s*end - start <= 60\)/);
   assert.match(html, /event\.tabIndex\s*=\s*0/);
   assert.match(html, /event\.addEventListener\("pointerenter",[\s\S]*activateEventFocus\(event\)/);
   assert.match(html, /event\.addEventListener\("pointerleave",[\s\S]*clearEventFocus\(dayColumn\)/);
@@ -172,6 +300,8 @@ test("schedule display compacts explicitly separated multiple instructors", asyn
     "Atoche Diaz, W. J. / Fernandez Perez, M. A."
   );
   assert.equal(compactInstructor("Cornejo, C"), "Cornejo, C");
+  assert.equal(compactInstructor("Barrantes, Roxana"), "Barrantes, R.");
+  assert.equal(compactInstructor("Távara, José / Vásquez, Arturo"), "Távara, J. / Vásquez, A.");
 });
 
 test("schedule renderer embeds normalized data into a standalone HTML file", async () => {
@@ -190,7 +320,8 @@ test("schedule renderer embeds normalized data into a standalone HTML file", asy
       instructor: "Docente",
       classes: "Lun 08:00–10:00",
       practice: "—",
-      exams: "—"
+      exams: "—",
+      examStatus: "not_published"
     }],
     sessions: [{
       day: 1,
@@ -227,7 +358,7 @@ test("schedule header summarizes credits and course count", async () => {
   assert.match(html, /getElementById\("credits-badge"\)\.textContent\s*=\s*summary/);
 });
 
-test("Campus skill points agents to the bundled schedule renderer", async () => {
+test("PUCP Academic points agents to the bundled schedule renderer", async () => {
   const skill = await readFile(path.join(skillRoot, "SKILL.md"), "utf8");
   const referencePath = path.join(skillRoot, "references", "horario-html.md");
   assert.equal(await exists(referencePath), true, "schedule reference must exist");
@@ -241,6 +372,9 @@ test("Campus skill points agents to the bundled schedule renderer", async () => 
   assert.match(reference, /separa.*docentes.*\//i);
   assert.match(reference, /abre.*HTML.*verifica/i);
   assert.match(reference, /evita.*mayúsculas/i);
+  assert.match(reference, /cada curso que declare exámenes.*type.*exam/is);
+  assert.match(reference, /examStatus.*published.*not_published.*unknown/is);
+  assert.match(reference, /no cambies.*exams.*-.*validaci/is);
 });
 
 test("public installations discover and copy the complete HTML schedule skill", async () => {

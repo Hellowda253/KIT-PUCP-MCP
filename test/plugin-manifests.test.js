@@ -20,15 +20,14 @@ test("plugin manifests package PUCP skills without embedding secrets", async () 
 
   assert.equal(codex.name, "pucp-mcp");
   assert.equal(claude.name, "pucp-mcp");
-  assert.equal(codex.version, "0.1.0");
-  assert.equal(claude.version, "0.1.0");
+  assert.equal(codex.version, "0.2.0");
+  assert.equal(claude.version, "0.2.0");
   assert.equal(codex.skills, "./skills/");
   assert.doesNotMatch(
     JSON.stringify({ codex, claude }),
     /PAIDEIA_PASS|CAMPUS_PUCP_PASS|PASSWORD|student-secret-sentinel/iu
   );
 });
-
 test("client templates name all servers and remain public placeholders", async () => {
   const paths = [
     "integrations/codex/config.example.toml",
@@ -58,12 +57,12 @@ test("client templates name all servers and remain public placeholders", async (
 test("all bundled skill metadata is valid UTF-8", async () => {
   const metadata = await Promise.all([
     read("skills/profe-pucp/agents/openai.yaml"),
-    read("skills/pucp-academic-overview/agents/openai.yaml"),
-    read("skills/pucp-campus-virtual/agents/openai.yaml"),
-    read("skills/pucp-context/agents/openai.yaml"),
-    read("skills/pucp-paideia/agents/openai.yaml")
+    read("skills/pucp-academic/agents/openai.yaml"),
+    read("skills/pucp-context/agents/openai.yaml")
   ]);
+  assert.equal(metadata.length, 3);
   for (const value of metadata) {
+    assert.ok(value);
     assert.doesNotMatch(value, /\uFFFD/u);
   }
 });

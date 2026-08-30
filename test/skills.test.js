@@ -1,163 +1,162 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
-test("Paideia skill guides agents across both authenticated areas", async () => {
-  const skill = await readFile(
-    new URL("../skills/pucp-paideia/SKILL.md", import.meta.url),
-    "utf8"
-  );
+const root = path.resolve(import.meta.dirname, "..");
+const skillsRoot = path.join(root, "skills");
 
-  assert.match(skill, /^---[\s\S]*description:\s*Use when\b/m);
-  assert.match(skill, /Pregrado\/Posgrado/);
-  assert.match(skill, /Educaci[oó]n Continua/);
-  assert.match(skill, /areaStates/);
-  assert.match(skill, /no.*servidor.*adicional/i);
+const read = (relativePath) =>
+  readFile(path.join(root, relativePath), "utf8").catch(() => "");
+
+const exists = (relativePath) =>
+  access(path.join(root, relativePath)).then(() => true, () => false);
+
+function metadata(skill) {
+  const frontmatter = skill.match(/^---\s*\n([\s\S]*?)\n---/u)?.[1] ?? "";
+  return Object.fromEntries(
+    frontmatter
+      .split(/\r?\n/u)
+      .map((line) => line.match(/^([a-z][a-z0-9_-]*):\s*(.+)$/u))
+      .filter(Boolean)
+      .map((match) => [match[1], match[2].replace(/^['"]|['"]$/gu, "")])
+  );
+}
+
+function wordCount(value) {
+  return value.trim().split(/\s+/u).filter(Boolean).length;
+}
+
+test("the public kit exposes exactly three intent-oriented skills", async () => {
+  const directories = (await readdir(skillsRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+
+  assert.deepEqual(directories, ["profe-pucp", "pucp-academic", "pucp-context"]);
+  for (const directory of directories) {
+    const skill = await read(`skills/${directory}/SKILL.md`);
+    const frontmatter = metadata(skill);
+    assert.equal(frontmatter.name, directory);
+    assert.match(frontmatter.description ?? "", /^Use when\b/u);
+    assert.ok((frontmatter.description ?? "").length <= 500);
+  }
+});
+test("PUCP Academic routes personal data and loads detailed workflows only on demand", async () => {
+  const skill = await read("skills/pucp-academic/SKILL.md");
+  const ui = await read("skills/pucp-academic/agents/openai.yaml");
+  const referenceNames = [
+    "paideia.md",
+    "campus-virtual.md",
+    "matricula-y-horarios.md",
+    "horario-html.md"
+  ];
+  const references = Object.fromEntries(await Promise.all(referenceNames.map(async (name) => [
+    name,
+    await read(`skills/pucp-academic/references/${name}`)
+  ])));
+
+  assert.ok(skill, "skills/pucp-academic/SKILL.md must exist");
+  assert.ok(wordCount(skill) < 400, "the academic router should stay compact");
+  assert.match(metadata(skill).description, /Campus Virtual.*Paideia|Paideia.*Campus Virtual/iu);
+  assert.match(skill, /pucp_academic_overview/u);
+  assert.match(skill, /fuente.*conflicto|conflicto.*fuente/iu);
+  for (const name of referenceNames) {
+    assert.ok(references[name], `${name} must exist`);
+    assert.match(skill, new RegExp(`references/${name.replaceAll(".", "\\.")}`, "u"));
+  }
+
+  assert.match(references["paideia.md"], /Pregrado\/Posgrado/iu);
+  assert.match(references["paideia.md"], /Educaci[oó]n Continua/iu);
+  assert.match(references["paideia.md"], /component|alcance/iu);
+  assert.match(references["campus-virtual.md"], /get_student_schedule/u);
+  assert.match(references["campus-virtual.md"], /pr[oó]xima clase.*get_campus_agenda/isu);
+  assert.match(references["campus-virtual.md"], /vac[ií]o.*no.*horario semanal/isu);
+  assert.match(references["campus-virtual.md"], /notas oficiales/iu);
+  assert.match(references["matricula-y-horarios.md"], /prepare_course_registration/u);
+  assert.match(references["matricula-y-horarios.md"], /commit_course_registration/u);
+  assert.match(references["matricula-y-horarios.md"], /confirmaci[oó]n explícita/iu);
+  assert.match(references["matricula-y-horarios.md"], /c[oó]digo de horario.*no.*nivel/isu);
+  assert.match(references["matricula-y-horarios.md"], /nivel explícito.*obligatorio/isu);
+  assert.match(references["matricula-y-horarios.md"], /Cursos Electivos.*nivel `?0`?/isu);
+  assert.match(references["matricula-y-horarios.md"], /otra unidad.*search_course_schedules.*no.*search_historical_course_schedules/isu);
+  assert.match(references["horario-html.md"], /scripts\/render-schedule\.mjs/u);
+  assert.match(ui, /display_name:\s*"PUCP Académico"/u);
+  assert.match(ui, /\$pucp-academic/u);
 });
 
-test("Campus and overview skills guide current schedules and confirmation-gated registration", async () => {
-  const campus = await readFile(
-    new URL("../skills/pucp-campus-virtual/SKILL.md", import.meta.url),
-    "utf8"
-  );
-  const overview = await readFile(
-    new URL("../skills/pucp-academic-overview/SKILL.md", import.meta.url),
-    "utf8"
-  );
-  assert.match(campus, /^---[\s\S]*description:\s*Use when\b/m);
-  assert.match(campus, /list_allowed_courses/);
-  assert.match(campus, /recommend_course_schedules/);
-  assert.match(campus, /Inscríbete aquí.*fuente principal/is);
-  assert.match(campus, /search_historical_course_schedules/);
-  assert.match(campus, /prepare_course_registration.*commit_course_registration/is);
-  assert.match(campus, /confirmación explícita/i);
-  assert.match(campus, /no.*reintentes.*Grabar/is);
-  assert.match(campus, /get_registration_status/);
-  assert.match(campus, /no[\s\S]{0,50}uses el generador del Campus/i);
-  assert.match(campus, /Nunca describas una vacante\s+como garantizada/i);
-  assert.match(campus, /acción marcada `blocked`/i);
-  assert.ok(campus.trim().split(/\s+/).length < 500);
-  assert.match(overview, /^---[\s\S]*description:\s*Use when\b/m);
-  assert.match(overview, /fechas.*impedimentos.*riesgo/is);
-  assert.match(overview, /no prometas una\s+vacante/i);
-  assert.ok(overview.trim().split(/\s+/).length < 300);
+test("Profe PUCP is a focused teaching workflow that requests academic context selectively", async () => {
+  const skill = await read("skills/profe-pucp/SKILL.md");
+  const assessment = await read("skills/profe-pucp/references/assessment-analysis.md");
+  const exam = await read("skills/profe-pucp/references/exam-preparation.md");
+  const sources = await read("skills/profe-pucp/references/course-sources.md");
+  const ui = await read("skills/profe-pucp/agents/openai.yaml");
+
+  assert.ok(wordCount(skill) < 550, "Profe PUCP should contain decisions, not generic pedagogy");
+  assert.match(metadata(skill).description, /learn|exercise|evaluation|feedback/iu);
+  assert.match(skill, /`pucp-academic`/u);
+  assert.match(skill, /`pucp-context`/u);
+  assert.match(skill, /duda conceptual.*no.*expediente|no.*expediente.*duda conceptual/isu);
+  assert.match(skill, /references\/assessment-analysis\.md/u);
+  assert.match(skill, /references\/exam-preparation\.md/u);
+  assert.match(skill, /references\/course-sources\.md/u);
+  assert.match(assessment, /f[oó]rmula.*confirmada/isu);
+  assert.match(assessment, /escenarios/iu);
+  assert.match(exam, /prioriza/iu);
+  assert.match(exam, /retroalimentaci[oó]n específica/iu);
+  assert.match(sources, /bibliograf[ií]a.*s[ií]labo/isu);
+  assert.match(sources, /no.*afirm.*consult|no.*finj.*consult/isu);
+  assert.match(sources, /edici[oó]n.*cap[ií]tulo.*p[aá]gina/isu);
+  assert.match(sources, /pregunta breve.*no.*s[ií]labo|no.*s[ií]labo.*pregunta breve/isu);
+  assert.match(ui, /display_name:\s*"Profe PUCP"/u);
+  assert.match(ui, /\$profe-pucp/u);
 });
 
-test("Profe PUCP teaches deeply without imposing a rigid response ritual", async () => {
-  const skillUrl = new URL("../skills/profe-pucp/SKILL.md", import.meta.url);
-  const skill = await readFile(skillUrl, "utf8").catch(() => "");
-  const assessment = await readFile(
-    new URL("../skills/profe-pucp/references/assessment-analysis.md", import.meta.url),
-    "utf8"
-  ).catch(() => "");
-  const examPreparation = await readFile(
-    new URL("../skills/profe-pucp/references/exam-preparation.md", import.meta.url),
-    "utf8"
-  ).catch(() => "");
-  const metadata = await readFile(
-    new URL("../skills/profe-pucp/agents/openai.yaml", import.meta.url),
-    "utf8"
-  ).catch(() => "");
-  const repositoryReadme = await readFile(
-    new URL("../README.md", import.meta.url),
-    "utf8"
+test("installation offers an optional academic library without imposing .UNI V2", async () => {
+  const agents = await read("AGENTS.md");
+  const installation = await read("docs/installation.md");
+  const academic = await read("skills/pucp-academic/SKILL.md");
+  const combined = `${agents}\n${installation}\n${academic}`;
+
+  assert.match(combined, /PUCP_DOWNLOADS_DIR/u);
+  assert.match(combined, /carpeta existente|ubicaci[oó]n existente/iu);
+  assert.match(combined, /ofrecer.*una sola vez|no.*insist/isu);
+  assert.match(combined, /no.*crear.*sin.*permiso/isu);
+  assert.doesNotMatch(
+    `${agents}\n${academic}`,
+    /(?:debe|obligatoriamente|siempre).{0,30}(?:crear|usar).{0,30}\.UNI V2/isu
   );
-
-  assert.ok(skill, "skills/profe-pucp/SKILL.md must exist");
-  assert.match(skill, /^---[\s\S]*description:\s*Use when\b/m);
-  assert.match(skill, /pregrado, posgrado y Educación Continua/i);
-  assert.match(skill, /consulta automáticamente/i);
-  assert.match(skill, /notas.*sílabo.*materiales.*anuncios.*pendientes.*calendario/is);
-  assert.match(skill, /no uses una plantilla fija/i);
-  assert.match(skill, /cuando resulte útil/i);
-  assert.match(skill, /no insistas/i);
-  assert.match(skill, /comprensión transferible/i);
-  assert.match(skill, /conceptual, procedimental, de cálculo o de interpretación/i);
-  assert.match(skill, /intuición.*formalización.*ejemplo.*comprobación/is);
-  assert.match(skill, /respuesta directa.*explicación conceptual.*resolución guiada.*retroalimentación/is);
-  assert.match(skill, /no ocultes una respuesta conocida/i);
-  assert.match(skill, /qué parte.*por qué.*cómo corregir/is);
-  assert.match(skill, /hechos.*inferencias.*supuestos/is);
-  assert.match(skill, /notación.*docente/is);
-  assert.match(skill, /references\/assessment-analysis\.md/);
-  assert.match(skill, /references\/exam-preparation\.md/);
-  assert.doesNotMatch(skill, /integridad académica/i);
-  assert.doesNotMatch(skill, /no abras.*intento/is);
-  assert.ok(skill.trim().split(/\s+/).length < 800, "SKILL.md should stay focused");
-
-  assert.match(assessment, /fórmula.*confirmada/is);
-  assert.match(assessment, /escenarios/i);
-  assert.match(examPreparation, /prioriza/i);
-  assert.match(examPreparation, /retroalimentación específica/i);
-  assert.doesNotMatch(examPreparation, /evaluaciones activas/i);
-  assert.match(metadata, /display_name: "Profe PUCP"/);
-  assert.match(metadata, /\$profe-pucp/);
-  assert.match(repositoryReadme, /`profe-pucp`/);
 });
 
-test("PUCP Context routes questions to current official sources without bloating every prompt", async () => {
-  const skill = await readFile(
-    new URL("../skills/pucp-context/SKILL.md", import.meta.url),
-    "utf8"
-  ).catch(() => "");
-  const catalog = await readFile(
-    new URL(
-      "../skills/pucp-context/references/official-sources.yaml",
-      import.meta.url
-    ),
-    "utf8"
-  ).catch(() => "");
-  const metadata = await readFile(
-    new URL("../skills/pucp-context/agents/openai.yaml", import.meta.url),
-    "utf8"
-  ).catch(() => "");
-  const professorSkill = await readFile(
-    new URL("../skills/profe-pucp/SKILL.md", import.meta.url),
-    "utf8"
-  );
-  const repositoryReadme = await readFile(
-    new URL("../README.md", import.meta.url),
-    "utf8"
-  );
+test("PUCP Context is limited to public institutional evidence", async () => {
+  const skill = await read("skills/pucp-context/SKILL.md");
+  const catalog = await read("skills/pucp-context/references/official-sources.yaml");
+  const ui = await read("skills/pucp-context/agents/openai.yaml");
 
-  assert.ok(skill, "skills/pucp-context/SKILL.md must exist");
-  assert.match(skill, /^---[\s\S]*description:\s*Use when\b/m);
-  assert.match(skill, /references\/official-sources\.yaml/);
-  assert.match(skill, /cargar.*catálogo.*solo/is);
-  assert.match(skill, /datos personales.*MCP/is);
-  assert.match(skill, /información pública.*web/is);
-  assert.match(skill, /unidad académica.*fuente general/is);
-  assert.match(skill, /sesión|session_id/i);
-  assert.match(skill, /tercero.*enlazado.*oficial/is);
-  assert.ok(skill.trim().split(/\s+/).length < 500, "pucp-context must stay compact");
+  assert.ok(wordCount(skill) < 350, "the public-source router should stay compact");
+  assert.match(metadata(skill).description, /regulations|procedures|services|official source/iu);
+  assert.match(skill, /datos personales.*`pucp-academic`|`pucp-academic`.*datos personales/isu);
+  assert.match(skill, /informaci[oó]n pública.*web/isu);
+  assert.match(skill, /references\/official-sources\.yaml/u);
+  assert.match(skill, /cargar.*solo cuando/isu);
+  assert.match(catalog, /last_reviewed:\s*"2026-07-29"/u);
+  assert.ok((catalog.match(/^\s+- id:/gmu) ?? []).length >= 20);
+  assert.doesNotMatch(catalog, /url:\s*"http:\/\//u);
+  assert.match(ui, /display_name:\s*"Contexto PUCP"/u);
+  assert.match(ui, /\$pucp-context/u);
+});
 
-  assert.match(catalog, /last_reviewed:\s*"2026-07-29"/);
-  assert.match(catalog, /id:\s*"paideia-portal"/);
-  assert.match(catalog, /id:\s*"campus-virtual-portal"/);
-  assert.match(catalog, /id:\s*"agora-campus-help"/);
-  assert.match(catalog, /id:\s*"student-portal"/);
-  assert.match(catalog, /id:\s*"student-regulations"/);
-  assert.match(catalog, /id:\s*"academic-calendar-hub"/);
-  assert.match(catalog, /id:\s*"institutional-documents"/);
-  assert.match(catalog, /id:\s*"library-portal"/);
-  assert.match(catalog, /id:\s*"institutional-repository"/);
-  assert.match(catalog, /id:\s*"daes-portal"/);
-  assert.match(catalog, /id:\s*"dti-portal"/);
-  assert.match(catalog, /id:\s*"international-mobility"/);
-  assert.match(catalog, /id:\s*"employability-portal"/);
-  assert.match(catalog, /id:\s*"continuing-education"/);
-  assert.match(catalog, /https:\/\/daes\.pucp\.edu\.pe\//);
-  assert.match(catalog, /https:\/\/empleabilidad\.pucp\.edu\.pe\//);
-  assert.match(catalog, /https:\/\/educacioncontinua\.pucp\.edu\.pe\//);
-  assert.doesNotMatch(catalog, /url:\s*"http:\/\//);
-  assert.doesNotMatch(catalog, /profesorado\.pucp\.edu\.pe/);
-  assert.ok(
-    (catalog.match(/^\s+- id:/gm) ?? []).length >= 20,
-    "official source catalog should cover the main student domains"
-  );
-
-  assert.match(metadata, /display_name:\s*"Contexto PUCP"/);
-  assert.match(metadata, /\$pucp-context/);
-  assert.match(professorSkill, /`pucp-context`/);
-  assert.match(repositoryReadme, /`pucp-context`/);
+test("retired skill names are absent from the public documentation", async () => {
+  const readme = await read("README.md");
+  for (const retired of [
+    "pucp-paideia",
+    "pucp-campus-virtual",
+    "pucp-academic-overview"
+  ]) {
+    assert.equal(await exists(`skills/${retired}`), false, `${retired} must be removed`);
+    assert.doesNotMatch(readme, new RegExp(`\\b${retired}\\b`, "u"));
+  }
+  for (const current of ["pucp-academic", "profe-pucp", "pucp-context"]) {
+    assert.match(readme, new RegExp(`\\b${current}\\b`, "u"));
+  }
 });

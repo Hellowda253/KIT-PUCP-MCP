@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -7,7 +7,8 @@ import test from "node:test";
 import {
   buildAntigravityConfig,
   buildToolContracts,
-  writeAntigravityConfig
+  writeAntigravityConfig,
+  writeToolContracts
 } from "../src/contracts.js";
 
 const servers = [
@@ -78,5 +79,27 @@ test("buildToolContracts converts MCP schemas to Antigravity declarations", () =
         }
       }
     ]
+  );
+});
+
+test("writeToolContracts prunes only obsolete JSON contracts", async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "pucp-tools-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, "retired_tool.json"), "{}\n");
+  await writeFile(path.join(directory, "README.txt"), "keep me\n");
+
+  await writeToolContracts(directory, [{
+    name: "list_courses",
+    description: "List cached courses.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false
+    }
+  }]);
+
+  assert.deepEqual(
+    (await readdir(directory)).sort(),
+    ["README.txt", "list_courses.json"]
   );
 });

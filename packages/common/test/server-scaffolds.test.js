@@ -13,7 +13,7 @@ test("Campus Virtual implementation exposes its non-empty MCP tool registry", as
     params: {}
   });
 
-  assert.equal(response.result.tools.length, 39);
+  assert.equal(response.result.tools.length, 33);
 });
 
 test("academic overview implementation exposes its five MCP tools", async () => {

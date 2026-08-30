@@ -19,6 +19,7 @@ import {
   parseLegacyCurriculumHtml,
   parseLegacyGradeStatisticsHtml,
   parseLegacyPartialGradesHtml,
+  parseCourseParticipantsHtml,
   parseAgendaPayload,
   parseModuleHtml,
   parsePortalModules
@@ -27,6 +28,49 @@ import {
 const fixtureRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const fixture = (name) => readFile(path.join(fixtureRoot, name), "utf8");
 const baseUrl = "https://campus.example.edu";
+
+test("course participant roster preserves the leading blank column and minimizes personal data", () => {
+  const html = `
+    <table>
+      <tr><th></th><th>Alumno</th><th>Nombre</th><th>Horario</th><th>Especialidad</th><th>E-mail</th><th>Enviar Mail</th></tr>
+      <tr><td><input type="checkbox"></td><td>20990001</td><td>Ana Ejemplo</td><td>0731</td><td>Ingeniería Industrial</td><td><a href="mailto:ana@example.invalid">ana@example.invalid</a></td><td>Enviar</td></tr>
+      <tr><td><input type="checkbox"></td><td>20990002</td><td>Bruno Prueba</td><td>0732</td><td>Ingeniería Informática</td><td>bruno@example.invalid</td><td>Enviar</td></tr>
+    </table>`;
+
+  const minimized = parseCourseParticipantsHtml(html);
+  assert.equal(minimized.state, "available");
+  assert.equal(minimized.total, 2);
+  assert.deepEqual(minimized.items[0], {
+    fullName: "Ana Ejemplo",
+    schedule: "0731",
+    specialty: "Ingeniería Industrial"
+  });
+  assert.equal(JSON.stringify(minimized).includes("20990001"), false);
+  assert.equal(JSON.stringify(minimized).includes("example.invalid"), false);
+
+  const explicit = parseCourseParticipantsHtml(html, {
+    includeEmail: true,
+    schedule: "0732",
+    query: "bruno",
+    limit: 1
+  });
+  assert.deepEqual(explicit.items, [{
+    fullName: "Bruno Prueba",
+    institutionalEmail: "bruno@example.invalid",
+    schedule: "0732",
+    specialty: "Ingeniería Informática"
+  }]);
+  assert.equal(explicit.total, 1);
+  assert.equal(explicit.count, 1);
+  assert.equal(explicit.truncated, false);
+});
+
+test("course participant parser refuses unrelated tables", () => {
+  assert.deepEqual(
+    parseCourseParticipantsHtml("<table><tr><th>Curso</th></tr><tr><td>IND270</td></tr></table>"),
+    { state: "unavailable", items: [], reason: "unsupported_layout" }
+  );
+});
 
 test("legacy grade statistics normalize summary, pass rates, distribution, and note types", async () => {
   const result = parseLegacyGradeStatisticsHtml(

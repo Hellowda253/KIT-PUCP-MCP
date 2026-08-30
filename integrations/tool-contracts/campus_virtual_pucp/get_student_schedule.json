@@ -1,6 +1,6 @@
 {
   "name": "get_student_schedule",
-  "description": "Return the authenticated student's own active weekly schedule from the Campus Horario button, including classes, practices, laboratories, exams, rooms, and overlaps.",
+  "description": "Return the authenticated student's own recurring weekly pattern from the Campus Horario button, including classes, practices, laboratories, exams, rooms, and overlaps. It describes the usual timetable but does not confirm that a session occurs on a specific calendar date; use Campus agenda for today or the next class.",
   "parameters": {
     "type": "object",
     "properties": {

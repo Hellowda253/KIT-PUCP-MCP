@@ -1,4 +1,4 @@
 interface:
   display_name: "Profe PUCP"
-  short_description: "Profesor particular contextual para estudiantes PUCP"
-  default_prompt: "Usa $profe-pucp para enseñarme con claridad y ayudarme a mejorar usando mi contexto académico actual."
+  short_description: "Tutoría clara y contextual para estudiantes PUCP"
+  default_prompt: "Usa $profe-pucp para enseñarme este tema con claridad, revisar mi razonamiento y adaptar la ayuda al curso."

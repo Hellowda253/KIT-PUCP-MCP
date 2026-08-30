@@ -77,6 +77,7 @@ const SAFE_ACTIONS = new Set([
   "panel",
   "ingresar",
   "mostrarhorarioacademico",
+  "mostrarresultadoshoracad",
   "mostrarinscripcion",
   "mostrarportal",
   "mostrarcriterioscursohor",
@@ -99,6 +100,10 @@ const COURSE_SCHEDULE_SEARCH_PATH =
   "/pucp/horarios/howcurho/howcurho";
 const STUDENT_SCHEDULE_PATH =
   "/pucp/horarios/howhorac/howhorac";
+const COURSE_PARTICIPANTS_PATH =
+  "/pucp/notas/nownotfi/nownotfi";
+const ENROLLED_COURSE_HUB_PATH =
+  "/pucp/ocr/ocwmcurs/ocwmcurs";
 const CROSS_UNIT_VACANCIES_PATH =
   "/pucp/horarios/howvacdi/howvacdi";
 const ALLOWED_COURSES_REPORT_PATH =
@@ -196,6 +201,27 @@ export function createCampusUrlPolicy({
         values.formatedlistacursos === "";
       if (valid) return url;
       throw policyError("Campus student schedule URL is not the exact read-only query");
+    }
+    const normalizedPath = url.pathname.replace(/;jsessionid=[^/]+$/i, "");
+    if (normalizedPath === COURSE_PARTICIPANTS_PATH) {
+      const entries = [...url.searchParams];
+      const values = Object.fromEntries(entries);
+      const expected = [
+        "accion", "vernotas", "cicloano", "ciclo", "tipociclo", "clavecurso"
+      ];
+      const keys = new Set(entries.map(([key]) => key));
+      const valid =
+        entries.length === expected.length &&
+        keys.size === expected.length &&
+        expected.every((key) => keys.has(key)) &&
+        values.accion === "Abrir" &&
+        values.vernotas === "0" &&
+        /^\d{4}$/.test(values.cicloano ?? "") &&
+        /^\d{2}$/.test(values.ciclo ?? "") &&
+        values.tipociclo === "00" &&
+        /^[A-Za-z0-9-]{3,15}$/.test(values.clavecurso ?? "");
+      if (valid) return url;
+      throw policyError("Campus course roster URL is not the exact read-only query");
     }
     if (
       url.pathname === ENROLLMENT_IMPEDIMENTS_PATH &&
@@ -311,6 +337,42 @@ export function createCampusUrlPolicy({
   } = {}) {
     const url = parse(value);
     const raw = String(body);
+    if (
+      String(method).toUpperCase() === "POST" &&
+      requestOrigins.has(url.origin) &&
+      url.pathname === ENROLLED_COURSE_HUB_PATH &&
+      raw === ""
+    ) {
+      const entries = [...url.searchParams];
+      const values = Object.fromEntries(entries);
+      const expected = [
+        "accion", "persona", "cicloAnoMatri", "cicloMatri", "tipoCicloMatri",
+        "cicloAnoDict", "cicloDict", "tipoCicloDict", "panel",
+        "sCicloAnoAdmCurso", "sCicloAdmCurso", "sTipoCicloAdmCurso",
+        "sTipoCicloAdmEspeci", "esCambioPestana", "sPestana", "session"
+      ];
+      const keys = new Set(entries.map(([key]) => key));
+      const empty = [
+        "cicloAnoDict", "cicloDict", "tipoCicloDict", "panel",
+        "sCicloAnoAdmCurso", "sCicloAdmCurso", "sTipoCicloAdmCurso",
+        "sTipoCicloAdmEspeci"
+      ];
+      const valid =
+        entries.length === expected.length &&
+        keys.size === expected.length &&
+        expected.every((key) => keys.has(key)) &&
+        values.accion === "Ingresar" &&
+        /^\d{6,12}$/.test(values.persona ?? "") &&
+        /^\d{4}$/.test(values.cicloAnoMatri ?? "") &&
+        /^\d{2}$/.test(values.cicloMatri ?? "") &&
+        values.tipoCicloMatri === "00" &&
+        empty.every((key) => values[key] === "") &&
+        values.esCambioPestana === "1" &&
+        values.sPestana === "1" &&
+        /^[A-Za-z0-9._:-]{16,128}$/.test(values.session ?? "");
+      if (valid) return url;
+      throw policyError("Campus enrolled-course hub is not the exact read-only POST");
+    }
     const gradeStatistics = [
       PARTIAL_GRADE_STATISTICS_PATH,
       FINAL_GRADE_STATISTICS_PATH
@@ -741,6 +803,12 @@ export function createCampusUrlPolicy({
     }
     if (!requestOrigins.has(url.origin) && !authOrigins.has(url.origin)) {
       throw policyError("Campus subresource origin is not allowlisted");
+    }
+    if (
+      url.pathname.replace(/;jsessionid=[^/]+$/i, "") ===
+      COURSE_PARTICIPANTS_PATH
+    ) {
+      return assertSafeGet(url);
     }
     assertNoMutation(url);
     if (

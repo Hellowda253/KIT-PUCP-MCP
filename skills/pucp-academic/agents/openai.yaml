@@ -1,0 +1,4 @@
+interface:
+  display_name: "PUCP Académico"
+  short_description: "Campus, Paideia, matrícula y horario HTML"
+  default_prompt: "Usa $pucp-academic para consultar y relacionar mi información académica actual de la PUCP, incluido un horario HTML cuando lo solicite."

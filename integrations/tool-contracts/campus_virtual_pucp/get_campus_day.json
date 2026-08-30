@@ -1,6 +1,6 @@
 {
   "name": "get_campus_day",
-  "description": "Return cached Campus agenda events for one YYYY-MM-DD date.",
+  "description": "Return confirmed Campus agenda events for one specific calendar date (YYYY-MM-DD). An empty result means no confirmed agenda event for that date; do not infer one from the recurring weekly schedule.",
   "parameters": {
     "type": "object",
     "properties": {

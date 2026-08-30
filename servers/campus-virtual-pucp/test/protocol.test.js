@@ -13,30 +13,24 @@ const expectedTools = [
   "get_campus_job_status",
   "get_campus_status",
   "get_curriculum_progress",
-  "get_enrollment_status",
-  "get_enrollment_calendar",
-  "get_enrollment_impediments",
-  "get_course_enrollment_statistics",
+  "get_enrollment_eligibility",
   "get_course_schedule_details",
   "get_enrollment_portal_section",
   "get_final_grade_statistics",
   "get_financial_status",
   "get_partial_grade_statistics",
-  "get_registration_portal_status",
   "get_registration_status",
-  "get_schedule_preferences",
   "get_student_schedule",
   "evaluate_course_schedule",
   "list_campus_changes",
   "list_campus_modules",
   "list_allowed_courses",
   "list_cross_unit_vacancies",
-  "list_enrollment_portal_sections",
   "list_enrolled_courses",
+  "list_course_participants",
   "list_obligations",
   "list_official_grades",
   "list_requests",
-  "list_schedule_scopes",
   "prepare_course_registration",
   "recommend_course_schedules",
   "search_campus_documents",
@@ -55,10 +49,7 @@ const minimalArguments = {
   get_campus_job_status: { jobId: "sync-1" },
   get_campus_status: {},
   get_curriculum_progress: {},
-  get_enrollment_status: {},
-  get_enrollment_calendar: {},
-  get_enrollment_impediments: {},
-  get_course_enrollment_statistics: { course: "1IND50" },
+  get_enrollment_eligibility: {},
   get_course_schedule_details: { course: "1IND50", schedule: "0831" },
   get_enrollment_portal_section: { section: "exceptions" },
   get_financial_status: {},
@@ -69,9 +60,7 @@ const minimalArguments = {
     evaluationType: "Ex",
     evaluationNumber: 2
   },
-  get_registration_portal_status: {},
   get_registration_status: {},
-  get_schedule_preferences: {},
   get_student_schedule: {},
   evaluate_course_schedule: {
     selections: [{ courseCode: "1IND50", scheduleId: "0831" }]
@@ -80,12 +69,11 @@ const minimalArguments = {
   list_campus_modules: {},
   list_allowed_courses: {},
   list_cross_unit_vacancies: {},
-  list_enrollment_portal_sections: {},
   list_enrolled_courses: {},
+  list_course_participants: { course: "IND270" },
   list_obligations: {},
   list_official_grades: {},
   list_requests: {},
-  list_schedule_scopes: {},
   prepare_course_registration: { add: [{ courseCode: "1IND50", scheduleId: "0831" }] },
   recommend_course_schedules: { courseCodes: ["1IND50"] },
   search_campus_documents: {},
@@ -109,6 +97,43 @@ test("Campus exposes payment information as read-only and no payment action", ()
     assert.match(tool.description, /read-only/i);
     assert.match(tool.description, /never (?:pays|submits a payment)/i);
   }
+});
+
+test("optimized enrollment schemas keep consolidated capabilities", () => {
+  const service = new Proxy({}, { get: () => async () => ({}) });
+  const tools = createCampusTools(service);
+  const eligibility = tools.find(({ name }) => name === "get_enrollment_eligibility");
+  const details = tools.find(({ name }) => name === "get_course_schedule_details");
+
+  assert.equal(Object.hasOwn(eligibility.inputSchema.properties, "term"), false);
+  assert.deepEqual(details.inputSchema.required, ["course"]);
+  assert.ok(details.inputSchema.properties.schedule);
+});
+
+test("Campus tool guidance distinguishes dated agenda, weekly schedule, and curriculum status", () => {
+  const service = new Proxy({}, { get: () => async () => ({}) });
+  const tools = createCampusTools(service);
+  const description = (name) => tools.find((tool) => tool.name === name)?.description ?? "";
+
+  assert.match(description("get_campus_day"), /specific calendar date/iu);
+  assert.match(description("get_campus_day"), /empty.*no confirmed agenda event/iu);
+  assert.match(description("get_campus_agenda"), /next class/iu);
+  assert.match(description("get_student_schedule"), /recurring weekly pattern/iu);
+  assert.match(description("get_student_schedule"), /does not confirm.*calendar date/iu);
+  assert.match(description("search_course_schedules"), /schedule (?:id|code).*does not determine.*curriculum level/iu);
+  assert.match(description("search_course_schedules"), /explicit.*level.*mandatory/iu);
+  assert.match(description("search_course_schedules"), /Nivel 0.*electiv/iu);
+  assert.match(description("search_course_schedules"), /other academic units.*active term.*schedule catalog/iu);
+  assert.match(
+    tools.find(({ name }) => name === "search_course_schedules")
+      .inputSchema.properties.academicScope.properties.curriculumLevel.description,
+    /positive level.*mandatory/iu
+  );
+  assert.match(
+    tools.find(({ name }) => name === "search_course_schedules")
+      .inputSchema.properties.academicScope.properties.curriculumLevel.description,
+    /Nivel 0.*electiv/iu
+  );
 });
 
 function envelope(name, args) {
@@ -136,30 +161,24 @@ test("Campus MCP advertises complete schemas and dispatches all required public 
     getCampusJobStatus: "get_campus_job_status",
     getCampusStatus: "get_campus_status",
     getCurriculumProgress: "get_curriculum_progress",
-    getEnrollmentStatus: "get_enrollment_status",
-    getEnrollmentCalendar: "get_enrollment_calendar",
-    getEnrollmentImpediments: "get_enrollment_impediments",
-    getCourseEnrollmentStatistics: "get_course_enrollment_statistics",
+    getEnrollmentEligibility: "get_enrollment_eligibility",
     getCourseScheduleDetails: "get_course_schedule_details",
     getEnrollmentPortalSection: "get_enrollment_portal_section",
     getFinancialStatus: "get_financial_status",
     getFinalGradeStatistics: "get_final_grade_statistics",
     getPartialGradeStatistics: "get_partial_grade_statistics",
-    getRegistrationPortalStatus: "get_registration_portal_status",
     getRegistrationStatus: "get_registration_status",
-    getSchedulePreferences: "get_schedule_preferences",
     getStudentSchedule: "get_student_schedule",
     evaluateCourseSchedule: "evaluate_course_schedule",
     listCampusChanges: "list_campus_changes",
     listCampusModules: "list_campus_modules",
     listAllowedCourses: "list_allowed_courses",
     listCrossUnitVacancies: "list_cross_unit_vacancies",
-    listEnrollmentPortalSections: "list_enrollment_portal_sections",
     listEnrolledCourses: "list_enrolled_courses",
+    listCourseParticipants: "list_course_participants",
     listObligations: "list_obligations",
     listOfficialGrades: "list_official_grades",
     listRequests: "list_requests",
-    listScheduleScopes: "list_schedule_scopes",
     prepareCourseRegistration: "prepare_course_registration",
     recommendCourseSchedules: "recommend_course_schedules",
     searchCampusDocuments: "search_campus_documents",

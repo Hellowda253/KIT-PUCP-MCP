@@ -13,16 +13,20 @@ y Claude Desktop en Windows; para otro cliente, usa su formato MCP `stdio` vigen
 3. Comprueba Node.js 20 o posterior y ejecuta `npm ci` en la raíz.
 4. Si falta `.env.local`, créalo a partir de `.env.example`.
 5. Configura credenciales según la sección siguiente.
-6. Ejecuta `npm run install-config -- --client CLIENTE --root RUTA_ABSOLUTA`.
-7. Lee la configuración vigente del cliente y crea una copia de seguridad antes de
+6. Ofrece una sola vez configurar una biblioteca académica. El usuario puede elegir
+   una carpeta existente o autorizar la creación de una nueva; si acepta, guarda su
+   ruta absoluta en `PUCP_DOWNLOADS_DIR`. No crees carpetas sin permiso ni insistas
+   si prefiere conservar el destino predeterminado.
+7. Ejecuta `npm run install-config -- --client CLIENTE --root RUTA_ABSOLUTA`.
+8. Lee la configuración vigente del cliente y crea una copia de seguridad antes de
    cambiarla. Conserva todos los servidores ajenos y combina únicamente `paideia`,
    `campus_virtual_pucp` y `pucp_academic_overview`.
-8. Instala las carpetas completas de `skills/` de forma recursiva, incluidos
+9. Instala las carpetas completas de `skills/` de forma recursiva, incluidos
    `assets/`, `references/`, `scripts/` y `agents/`, con el mecanismo admitido por
    el cliente. No sustituyas silenciosamente una versión más nueva.
-9. Ejecuta `npm run doctor -- --json`; después verifica `initialize` y `tools/list`
+10. Ejecuta `npm run doctor -- --json`; después verifica `initialize` y `tools/list`
    desde el cliente.
-10. Informa archivos modificados, pruebas realizadas y reversión disponible sin
+11. Informa archivos modificados, pruebas realizadas y reversión disponible sin
     mostrar secretos.
 
 ## Credenciales proporcionadas en el chat

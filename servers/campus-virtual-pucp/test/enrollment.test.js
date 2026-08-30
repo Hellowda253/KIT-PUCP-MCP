@@ -573,6 +573,19 @@ test("evaluation reports hard conflicts and recommendations explain unsatisfied 
   assert.equal(impossible.status, "no_valid_schedule");
   assert.ok(impossible.unsatisfiedConstraints.includes("free_days"));
   assert.ok(impossible.suggestedRelaxations.length > 0);
+  assert.deepEqual(impossible.preferences.freeDays, ["monday", "tuesday"]);
+});
+
+test("invalid recommendation requests still expose the effective preferences", () => {
+  const result = recommendCourseSchedules({
+    courseCodes: [],
+    localPreferences: { freeDays: ["friday"] },
+    preferences: { maxDays: 3 }
+  });
+
+  assert.equal(result.status, "invalid_course_count");
+  assert.deepEqual(result.preferences.freeDays, ["friday"]);
+  assert.equal(result.preferences.maxDays, 3);
 });
 
 test("local schedule preferences merge with per-call overrides without mutating either", () => {
@@ -633,6 +646,7 @@ test("maxDays is enforced and reported by evaluation", () => {
   });
   assert.equal(recommendation.status, "no_valid_schedule");
   assert.ok(recommendation.unsatisfiedConstraints.includes("max_days"));
+  assert.equal(recommendation.preferences.maxDays, 2);
   const evaluation = evaluateCourseSchedule({
     offerings: threeDays,
     selections: threeDays.map(({ courseCode, scheduleId }) => ({ courseCode, scheduleId })),

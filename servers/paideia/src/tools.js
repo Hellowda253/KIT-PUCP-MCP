@@ -147,6 +147,15 @@ export function createPaideiaTools(service) {
       handler: (args) => service.searchMaterials(args)
     },
     {
+      name: "get_paideia_folder_contents",
+      description: "Queue a live, read-only inspection of one Moodle folder and return its visible nested files through get_paideia_job_status. Does not download files.",
+      inputSchema: schema({
+        folder: { type: "string", minLength: 1 },
+        limit: { type: "integer", minimum: 1, maximum: 500 }
+      }, ["folder"]),
+      handler: (args) => service.getFolderContents(args)
+    },
+    {
       name: "list_material_changes",
       description: "Summarize additions, removals, and metadata changes across recent Paideia syncs.",
       inputSchema: schema({

@@ -6,7 +6,6 @@ const SMALL_WORDS = new Set([
 function hasLetters(value) {
   return /\p{L}/u.test(value);
 }
-
 function isAllUppercase(value) {
   return hasLetters(value) && !/\p{Ll}/u.test(value);
 }
@@ -32,19 +31,24 @@ function initials(value) {
     .join(" ");
 }
 
-function compactUppercasePerson(value) {
+function compactPerson(value) {
   const comma = value.indexOf(",");
   if (comma < 0 || value.indexOf(",", comma + 1) >= 0) return readableLabel(value);
   const surnames = readableLabel(value.slice(0, comma));
-  const givenNames = initials(value.slice(comma + 1));
+  const originalGivenNames = String(value.slice(comma + 1)).trim();
+  const alreadyCompact = originalGivenNames
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((word) => /^\p{L}\.?$/u.test(word));
+  const givenNames = alreadyCompact ? originalGivenNames : initials(originalGivenNames);
   return [surnames, givenNames].filter(Boolean).join(", ");
 }
 
 export function compactInstructor(value) {
   const text = String(value ?? "").trim().replace(/\s+/g, " ");
-  if (!text || !isAllUppercase(text)) return text;
+  if (!text) return text;
   const people = text.split(/\s+(?:\/|;|\|)\s+/).filter(Boolean);
-  return people.map(compactUppercasePerson).join(" / ");
+  return people.map(compactPerson).join(" / ");
 }
 
 export function prepareScheduleDisplayData(data) {

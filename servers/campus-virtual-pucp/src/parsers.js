@@ -183,6 +183,82 @@ function pick(row, aliases) {
   return key ? row[key] : { text: "", html: "" };
 }
 
+export function parseCourseParticipantsHtml(html, options = {}) {
+  const required = ["alumno", "nombre", "horario", "especialidad", "e mail"];
+  const normalizedHeader = (value) =>
+    searchableText(value).replace(/[^a-z0-9]+/g, " ").trim();
+  let roster = null;
+  for (const table of String(html).matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)) {
+    const rows = [...table[1].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)];
+    for (let headerIndex = 0; headerIndex < rows.length; headerIndex += 1) {
+      const cells = [...rows[headerIndex][1].matchAll(/<(?:th|td)\b[^>]*>([\s\S]*?)<\/(?:th|td)>/gi)]
+        .map((cell) => cleanText(cell[1]));
+      const headers = cells.map(normalizedHeader);
+      if (!required.every((name) => headers.includes(name))) continue;
+      roster = { rows, headerIndex, headers };
+      break;
+    }
+    if (roster) break;
+  }
+  if (!roster) {
+    return { state: "unavailable", items: [], reason: "unsupported_layout" };
+  }
+
+  const index = Object.fromEntries(
+    required.map((name) => [name, roster.headers.indexOf(name)])
+  );
+  const parsed = [];
+  for (const row of roster.rows.slice(roster.headerIndex + 1)) {
+    const cells = [...row[1].matchAll(/<(?:th|td)\b[^>]*>([\s\S]*?)<\/(?:th|td)>/gi)]
+      .map((cell) => ({ html: cell[1], text: cleanText(cell[1]) }));
+    const fullName = cells[index.nombre]?.text ?? "";
+    if (!fullName) continue;
+    const studentCode = cells[index.alumno]?.text ?? "";
+    const emailCell = cells[index["e mail"]] ?? { html: "", text: "" };
+    const institutionalEmail = cleanText(
+      emailCell.html.match(/\bmailto:([^"'\s>]+)/i)?.[1] ?? emailCell.text
+    );
+    parsed.push({
+      studentCode,
+      fullName,
+      institutionalEmail,
+      schedule: cells[index.horario]?.text ?? "",
+      specialty: cells[index.especialidad]?.text ?? ""
+    });
+  }
+
+  const schedule = searchableText(options.schedule ?? "");
+  const query = searchableText(options.query ?? "");
+  const filtered = parsed.filter((person) =>
+    (!schedule || searchableText(person.schedule) === schedule) &&
+    (!query || searchableText([
+      person.studentCode,
+      person.fullName,
+      person.schedule,
+      person.specialty,
+      options.includeEmail === true ? person.institutionalEmail : ""
+    ].join(" ")).includes(query))
+  );
+  const limit = Math.max(1, Math.min(Number(options.limit ?? 200) || 200, 200));
+  const items = filtered.slice(0, limit).map((person) => {
+    const {
+      studentCode: _studentCode,
+      institutionalEmail,
+      ...minimized
+    } = person;
+    return options.includeEmail === true
+      ? { ...minimized, institutionalEmail }
+      : minimized;
+  });
+  return {
+    state: "available",
+    total: filtered.length,
+    count: items.length,
+    truncated: items.length < filtered.length,
+    items
+  };
+}
+
 function number(value) {
   const parsed = Number(
     String(value ?? "")

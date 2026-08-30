@@ -1,0 +1,22 @@
+{
+  "name": "get_paideia_folder_contents",
+  "description": "Queue a live, read-only inspection of one Moodle folder and return its visible nested files through get_paideia_job_status. Does not download files.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "folder": {
+        "type": "string",
+        "minLength": 1
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500
+      }
+    },
+    "required": [
+      "folder"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -1219,6 +1219,49 @@ export function createCampusService({
         matches(item.status, options.status),
       100
     );
+
+  async function listCourseParticipants(options = {}) {
+    if (typeof adapter.getCourseParticipants !== "function") {
+      throw new McpToolError(
+        "course_roster_unavailable",
+        "The Campus adapter does not support the authenticated course roster"
+      );
+    }
+    const result = await adapter.getCourseParticipants({
+      course: String(options.course ?? "").trim(),
+      schedule: String(options.schedule ?? "").trim(),
+      query: String(options.query ?? "").trim(),
+      includeEmail: options.includeEmail === true,
+      limit: clamp(options.limit, 200, 200),
+      metadataOnly: true,
+      allowDownloads: false,
+      allowMutations: false
+    });
+    const timestamp = result.retrievedAt ?? now();
+    return createEnvelope({
+      source: SOURCE,
+      retrievedAt: timestamp,
+      generatedAt: timestamp,
+      ttlSeconds: 0,
+      now: now(),
+      data: {
+        state: result.state,
+        source: "campus_course_roster",
+        courseCode: result.courseCode,
+        courseName: result.courseName,
+        activeTerm: result.term || null,
+        scope: options.schedule ? "course_schedule" : "whole_course",
+        schedule: options.schedule || null,
+        total: result.total,
+        count: result.count,
+        truncated: result.truncated,
+        people: result.items
+      },
+      warnings: options.includeEmail === true
+        ? ["Institutional email addresses were included because includeEmail was explicitly enabled."]
+        : []
+    });
+  }
   const listOfficialGrades = (options = {}) =>
     listItems(
       "official_grades",
@@ -1314,11 +1357,121 @@ export function createCampusService({
         alerts: [
           ...(entry.alerts ?? []),
           ...(impediments?.state === "available" && (impediments.items ?? []).length > 0
-            ? ["Campus reports enrollment impediments; inspect get_enrollment_impediments for details."]
+            ? ["Campus reports enrollment impediments; inspect get_enrollment_eligibility for details."]
             : [])
         ]
       };
     });
+
+  async function getEnrollmentEligibility(options = {}) {
+    const snapshot = await readSnapshot();
+    const sourceKeys = [
+      "enrollment",
+      "enrollment_calendar",
+      "enrollment_impediments",
+      "allowed_courses",
+      "enrollment_portal"
+    ];
+    const entries = Object.fromEntries(
+      sourceKeys.map((key) => [key, snapshot.modules?.[key] ?? unavailable(key)])
+    );
+    const availableSources = sourceKeys.filter((key) => entries[key].state === "available");
+    const generatedAt = availableSources
+      .map((key) => entries[key].generatedAt ?? snapshot.generatedAt)
+      .sort()[0] ?? snapshot.generatedAt;
+    const ttlSeconds = Math.min(
+      ...sourceKeys.map((key) => ttlFor(key, snapshot, activeEnrollment))
+    );
+    const refresh = Boolean(options.forceRefresh) || sourceKeys.some((key) =>
+      shouldRefresh({
+        forceRefresh: false,
+        generatedAt: entries[key].generatedAt ?? snapshot.generatedAt,
+        now: now(),
+        ttlSeconds: ttlFor(key, snapshot, activeEnrollment)
+      })
+    );
+    const job = refresh
+      ? startSync({ reason: options.forceRefresh ? "forced" : "stale" })
+      : null;
+    const enrollment = entries.enrollment;
+    const calendar = entries.enrollment_calendar;
+    const impediments = entries.enrollment_impediments;
+    const allowed = entries.allowed_courses;
+    const portal = entries.enrollment_portal;
+    const calendarItems = (calendar.state === "available" ? calendar.items ?? [] : [])
+      .sort((left, right) => Date.parse(left.start ?? "") - Date.parse(right.start ?? ""))
+      .slice(0, 20);
+    const impedimentItems = impediments.state === "available"
+      ? impediments.items ?? []
+      : [];
+    const complete = sourceKeys.every((key) => entries[key].state === "available");
+    const data = {
+      state: availableSources.length > 0 ? "available" : "unavailable",
+      activeTerm: enrollment.value?.term ?? enrollmentTerm({}, snapshot) ?? null,
+      value: {
+        ...(enrollment.state === "available" && enrollment.value
+          ? enrollment.value
+          : {}),
+        eligibilityState: complete ? "complete" : availableSources.length > 0 ? "partial" : "unavailable",
+        eligibilityReason: enrollment.state === "available"
+          ? null
+          : enrollment.reason ?? "not_visible",
+        activeWindow: activeEnrollment(snapshot),
+        portalState: portal.state,
+        allowedCourseCount: allowed.state === "available" ? (allowed.items ?? []).length : null,
+        impedimentCount: impediments.state === "available" ? impedimentItems.length : null
+      },
+      calendar: {
+        state: calendar.state,
+        ...(calendar.reason ? { reason: calendar.reason } : {}),
+        generatedAt: calendar.generatedAt ?? null,
+        count: calendarItems.length,
+        items: calendarItems
+      },
+      impediments: {
+        state: impediments.state,
+        ...(impediments.reason ? { reason: impediments.reason } : {}),
+        generatedAt: impediments.generatedAt ?? null,
+        count: impedimentItems.length,
+        items: impedimentItems
+      },
+      allowedCourses: {
+        state: allowed.state,
+        ...(allowed.reason ? { reason: allowed.reason } : {}),
+        generatedAt: allowed.generatedAt ?? null,
+        count: allowed.state === "available" ? (allowed.items ?? []).length : 0
+      },
+      portal: {
+        state: portal.state,
+        ...(portal.reason ? { reason: portal.reason } : {}),
+        generatedAt: portal.generatedAt ?? null
+      },
+      sourceStates: Object.fromEntries(
+        sourceKeys.map((key) => [key, {
+          state: entries[key].state,
+          ...(entries[key].reason ? { reason: entries[key].reason } : {}),
+          generatedAt: entries[key].generatedAt ?? null
+        }])
+      ),
+      sourcesUsed: availableSources,
+      alerts: [
+        ...(enrollment.alerts ?? []),
+        ...(impedimentItems.length > 0
+          ? ["Campus reports enrollment impediments in this response."]
+          : [])
+      ]
+    };
+    if (job) data.refreshJobId = job.jobId;
+    return envelope(
+      snapshot,
+      generatedAt,
+      data,
+      ttlSeconds,
+      job
+        ? ["Cached enrollment eligibility was returned while Campus refreshes its component modules."]
+        : []
+    );
+  }
 
   const getEnrollmentCalendar = (options = {}) =>
     listItems(
@@ -1416,8 +1569,11 @@ export function createCampusService({
       workspace.retrievedAt ?? now(),
       {
         state: workspace.state,
+        portalState: workspace.state,
         enrollmentMode: workspace.enrollmentMode,
         activeTerm: workspace.activeTerm,
+        turn: workspace.turn ?? null,
+        summary: workspace.summary ?? {},
         registered: (workspace.registered ?? []).map(publicRegistrationItem),
         source: "enrollment_portal",
         sourcesUsed: ["enrollment_portal"]
@@ -1844,12 +2000,58 @@ export function createCampusService({
     );
   }
 
-  const getCourseScheduleDetails = (options) =>
-    scheduleLookup(options, async (items) => ({
-      state: "available",
-      item: items[0],
-      linkedItems: items.slice(1)
-    }));
+  async function getCourseScheduleDetails(options) {
+    const snapshot = await readSnapshot();
+    let liveOfferings = [];
+    let liveWarning = "";
+    if (registrationPortalExpected(snapshot)) {
+      try {
+        const workspace = await readLiveRegistrationWorkspace({
+          courseCodes: [options.course]
+        });
+        const requestedTerm = options.term || enrollmentTerm(options, snapshot);
+        if (!options.term || requestedTerm === workspace.activeTerm) {
+          liveOfferings = (workspace.offerings ?? []).filter((item) =>
+            String(item.courseCode).toUpperCase() === String(options.course).toUpperCase()
+          );
+        }
+      } catch {
+        liveWarning = "Live enrollment capacity is unavailable; cached schedule evidence was returned.";
+      }
+    }
+    const result = await scheduleLookup(options, async (items) => {
+      const enrich = (item) => {
+        const live = liveOfferings.find((candidate) =>
+          String(candidate.scheduleId) === String(item.scheduleId) &&
+          (
+            !candidate.scheduleType ||
+            !item.scheduleType ||
+            candidate.scheduleType === item.scheduleType
+          )
+        );
+        const capacity = live?.capacity ?? item.capacity ?? null;
+        return {
+          ...item,
+          capacity,
+          risk: assessEnrollmentRisk({
+            ...(capacity ?? {}),
+            retrievedAt: live?.retrievedAt ?? item.retrievedAt ?? null
+          })
+        };
+      };
+      const enriched = items.map(enrich);
+      return {
+        state: "available",
+        count: enriched.length,
+        items: enriched,
+        item: enriched[0],
+        linkedItems: enriched.slice(1)
+      };
+    });
+    return liveWarning
+      ? { ...result, warnings: [...result.warnings, liveWarning] }
+      : result;
+  }
 
   async function getCourseEnrollmentStatistics(options) {
     let liveWarning = "";
@@ -2213,6 +2415,7 @@ export function createCampusService({
     getCurriculumProgress,
     getCourseEnrollmentStatistics,
     getCourseScheduleDetails,
+    getEnrollmentEligibility,
     getEnrollmentCalendar,
     getEnrollmentImpediments,
     getEnrollmentPortalSection,
@@ -2230,6 +2433,7 @@ export function createCampusService({
     listCampusModules,
     listCrossUnitVacancies,
     listEnrolledCourses,
+    listCourseParticipants,
     listEnrollmentPortalSections,
     listObligations,
     listOfficialGrades,

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Campus Virtual PUCP"
-  short_description: "Consulta Campus y genera horarios PUCP en HTML"
-  default_prompt: "Usa $pucp-campus-virtual para consultar Campus o generar mi horario PUCP final en HTML."

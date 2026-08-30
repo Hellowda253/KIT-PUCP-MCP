@@ -364,7 +364,8 @@ export function evaluateCourseSchedule({ offerings = [], selections = [], prefer
     courses: selected.map(publicCourse),
     score: result.score,
     scoreBreakdown: result.scoreBreakdown,
-    explanation: result.explanation
+    explanation: result.explanation,
+    preferences: effective
   };
 }
 
@@ -377,15 +378,16 @@ export function recommendCourseSchedules({
   retrievedAt = null,
   searchLimits = {}
 }) {
+  const effective = mergeSchedulePreferences(localPreferences, preferences);
   const codes = [...new Set(courseCodes.map((code) => String(code).toUpperCase()))];
   if (codes.length === 0 || codes.length > 10) {
     return {
       status: "invalid_course_count",
       recommendations: [],
+      preferences: effective,
       warnings: ["Select between one and ten courses."]
     };
   }
-  const effective = mergeSchedulePreferences(localPreferences, preferences);
   const byCourse = buildCourseOptions(offerings);
   const unsatisfied = new Set();
   const candidates = codes.map((code) =>
@@ -467,6 +469,7 @@ export function recommendCourseSchedules({
         constraint,
         suggestion: `Review or relax ${constraint.replaceAll("_", " ")}.`
       })),
+      preferences: effective,
       retrievedAt,
       search: {
         exhaustive: !truncated,

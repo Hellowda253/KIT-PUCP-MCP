@@ -12,6 +12,7 @@ const expectedTools = [
   "download_paideia_resource",
   "get_activity_details",
   "get_course_outline",
+  "get_paideia_folder_contents",
   "get_paideia_job_status",
   "get_paideia_status",
   "list_activities",

@@ -146,37 +146,140 @@ async function setup(options = {}) {
 test("enrollment portal, reports, schedules, preferences, and optimizer use stable envelopes", async () => {
   const { service } = await setup();
   const results = [
-    await service.getEnrollmentCalendar({ term: "2026-2" }),
-    await service.getEnrollmentImpediments({ term: "2026-2" }),
+    await service.getEnrollmentEligibility({ term: "2026-2" }),
     await service.listAllowedCourses({ term: "2026-2" }),
     await service.searchCourseSchedules({ term: "2026-2", courseCodes: ["1IND50", "1IND51"] }),
     await service.getCourseScheduleDetails({ term: "2026-2", course: "1IND50", schedule: "0831" }),
-    await service.getCourseEnrollmentStatistics({ term: "2026-2", course: "1IND50", schedule: "0831" }),
     await service.listCrossUnitVacancies({ term: "2026-2" }),
-    await service.listEnrollmentPortalSections({}),
     await service.getEnrollmentPortalSection({ section: "exceptions" }),
-    await service.getSchedulePreferences(),
     await service.recommendCourseSchedules({ courseCodes: ["1IND50", "1IND51"], term: "2026-2" }),
     await service.evaluateCourseSchedule({ selections: [{ courseCode: "1IND50", scheduleId: "0831" }, { courseCode: "1IND51", scheduleId: "0901" }], term: "2026-2" })
   ];
   for (const result of results) {
     assert.deepEqual(Object.keys(result), ["source", "retrievedAt", "cache", "data", "warnings"]);
   }
-  assert.equal(results[2].data.items.length, 2);
-  assert.equal(results[3].data.total, 3);
-  assert.equal(results[4].data.item.scheduleId, "0831");
-  assert.equal(results[5].data.items[0].risk.guaranteed, false);
-  assert.equal(results[7].data.sections.length, 5);
-  assert.equal(results[8].data.section.actions[0].access, "blocked");
-  assert.deepEqual(results[9].data.local.freeDays, ["friday"]);
-  assert.equal(results[10].data.status, "complete");
-  assert.equal(results[10].data.recommendations.length, 2);
-  assert.equal(results[11].data.valid, true);
+  assert.equal(results[0].data.value.allowedCourseCount, 2);
+  assert.equal(results[0].data.impediments.items.length, 1);
+  assert.equal(results[0].data.calendar.items.length, 1);
+  assert.equal(results[1].data.items.length, 2);
+  assert.equal(results[2].data.total, 3);
+  assert.equal(results[3].data.count, 1);
+  assert.equal(results[3].data.item.scheduleId, "0831");
+  assert.equal(results[3].data.item.risk.guaranteed, false);
+  assert.equal(results[5].data.section.actions[0].access, "blocked");
+  assert.equal(results[6].data.status, "complete");
+  assert.equal(results[6].data.recommendations.length, 2);
+  assert.equal(results[7].data.valid, true);
+  assert.deepEqual(results[7].data.preferences.freeDays, ["friday"]);
 });
 
-test("enrollment statistics prefer the live registered position over cached capacity", async () => {
-  const seen = [];
+test("enrollment eligibility remains useful when the base enrollment module is unavailable", async () => {
+  const partialSnapshot = structuredClone(snapshot);
+  partialSnapshot.modules.enrollment = {
+    state: "unavailable",
+    generatedAt,
+    value: null,
+    reason: "not_visible"
+  };
+  const { service } = await setup({ snapshot: partialSnapshot });
+
+  const result = await service.getEnrollmentEligibility();
+
+  assert.equal(result.data.state, "available");
+  assert.equal(result.data.value.eligibilityState, "partial");
+  assert.equal(result.data.calendar.count, 1);
+  assert.equal(result.data.impediments.count, 1);
+  assert.equal(result.data.allowedCourses.count, 2);
+});
+
+test("registration status preserves the live turn and portal summary", async () => {
   const { service } = await setup({
+    adapter: {
+      async sync() { return snapshot; },
+      async readRegistrationWorkspace() {
+        return {
+          state: "available",
+          enrollmentMode: "regular",
+          activeTerm: "2026-2",
+          retrievedAt: generatedAt,
+          turn: { raw: "Turno 42", order: 42 },
+          summary: { registeredCourses: 5, credits: 18.5 },
+          registered: []
+        };
+      }
+    }
+  });
+
+  const result = await service.getRegistrationStatus();
+
+  assert.deepEqual(result.data.turn, { raw: "Turno 42", order: 42 });
+  assert.deepEqual(result.data.summary, { registeredCourses: 5, credits: 18.5 });
+  assert.equal(result.data.portalState, "available");
+});
+
+test("course participants are returned live without exposing email by default", async () => {
+  const received = [];
+  const { service } = await setup({
+    adapter: {
+      async sync() { return snapshot; },
+      async getCourseParticipants(options) {
+        received.push(options);
+        return {
+          state: "available",
+          courseCode: "IND270",
+          courseName: "Procesos Industriales",
+          term: "2026-2",
+          retrievedAt: "2026-08-24T12:00:00.000Z",
+          total: 1,
+          count: 1,
+          truncated: false,
+          items: [{ fullName: "Ana Ejemplo", schedule: "0731", specialty: "Ingeniería Industrial" }]
+        };
+      }
+    },
+    now: () => "2026-08-24T12:00:00.000Z"
+  });
+
+  const result = await service.listCourseParticipants({ course: "IND270" });
+
+  assert.equal(result.data.source, "campus_course_roster");
+  assert.equal(result.data.count, 1);
+  assert.equal(JSON.stringify(result).includes("institutionalEmail"), false);
+  assert.deepEqual(received, [{
+    course: "IND270",
+    schedule: "",
+    query: "",
+    includeEmail: false,
+    limit: 200,
+    metadataOnly: true,
+    allowDownloads: false,
+    allowMutations: false
+  }]);
+});
+
+test("course schedule details can return every section with capacity and risk", async () => {
+  const { service } = await setup();
+
+  const result = await service.getCourseScheduleDetails({ course: "1IND50" });
+
+  assert.equal(result.data.state, "available");
+  assert.equal(result.data.count, 2);
+  assert.deepEqual(
+    result.data.items.map(({ scheduleId }) => scheduleId),
+    ["0831", "0832"]
+  );
+  assert.equal(result.data.items.every(({ risk }) => risk?.guaranteed === false), true);
+});
+
+test("course schedule details prefer the live registered position over cached capacity", async () => {
+  const seen = [];
+  const activeSnapshot = structuredClone(snapshot);
+  activeSnapshot.modules.enrollment_portal.value.sections[1].actions.push({
+    label: "Inscríbete aquí",
+    access: "read"
+  });
+  const { service } = await setup({
+    snapshot: activeSnapshot,
     scheduleCache: {
       entries: [{
         generatedAt,
@@ -194,7 +297,7 @@ test("enrollment statistics prefer the live registered position over cached capa
       }]
     },
     adapter: {
-      async sync() { return snapshot; },
+      async sync() { return activeSnapshot; },
       async readRegistrationWorkspace(input) {
         seen.push(input);
         return {
@@ -220,13 +323,13 @@ test("enrollment statistics prefer the live registered position over cached capa
     }
   });
 
-  const result = await service.getCourseEnrollmentStatistics({
+  const result = await service.getCourseScheduleDetails({
     course: "1IND50",
     schedule: "0831"
   });
 
-  assert.equal(result.data.items[0].capacity.userPosition, 4);
-  assert.equal(result.data.items[0].risk.reason, "personal_position_has_margin");
+  assert.equal(result.data.item.capacity.userPosition, 4);
+  assert.equal(result.data.item.risk.reason, "personal_position_has_margin");
   assert.deepEqual(seen[0].courseCodes, ["1IND50"]);
 });
 
@@ -779,7 +882,7 @@ test("all successful Campus queries use one five-field envelope and normalized m
   assert.equal(results[7].data.summary.plan, "35 - Vigente");
   assert.equal(results[8].data.value.turn, "1");
   assert.equal(results[8].data.alerts.length, 2);
-  assert.match(results[8].data.alerts[1], /get_enrollment_impediments/);
+  assert.match(results[8].data.alerts[1], /get_enrollment_eligibility/);
   assert.equal(results[9].data.value.totalDue, 1234.5);
   assert.equal(results[12].data.items[0].sensitivity, "academic");
   assert.equal(results[0].data.modules.find(({ key }) => key === "other").state, "unavailable");

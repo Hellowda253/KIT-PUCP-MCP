@@ -369,6 +369,100 @@ test("explicit unsafe download destinations return path_not_allowed", async () =
   );
 });
 
+test("folder downloads resolve stale references with a focused metadata refresh", async () => {
+  const folder = {
+    id: "3256941",
+    courseId: "1",
+    course: "Álgebra",
+    section: "Semana 1",
+    type: "folder",
+    kind: "folder",
+    title: "CLASE",
+    url: "https://example/mod/folder/view.php?id=3256941"
+  };
+  const calls = [];
+  const { service, cachePath } = await setup({
+    adapter: {
+      async sync(input) {
+        calls.push({ operation: "sync", input });
+        return {
+          ...snapshot,
+          generatedAt: now,
+          retrievedAt: now,
+          activities: [...snapshot.activities, folder],
+          materials: [...snapshot.materials, folder],
+          coverage: {
+            components: ["catalog", "course_content"],
+            allCourses: true
+          }
+        };
+      },
+      async downloadResource(input) {
+        calls.push({ operation: "download", input });
+        return { destination: input.destination, downloaded: [], skipped: [] };
+      }
+    }
+  });
+
+  const queued = await service.downloadResource({ resource: "3256941" });
+  assert.equal(queued.data.status, "queued");
+  await service.waitForIdle();
+
+  const completed = await service.getJobStatus({ jobId: queued.data.jobId });
+  assert.equal(completed.data.status, "completed");
+  assert.deepEqual(calls.map(({ operation }) => operation), ["sync", "download"]);
+  assert.deepEqual(calls[0].input.components, ["catalog", "course_content"]);
+  assert.equal(calls[1].input.resource.id, "3256941");
+  assert.equal(calls[1].input.resource.kind, "folder");
+  assert.equal(
+    JSON.parse(await readFile(cachePath, "utf8")).materials.some(({ id }) => id === "3256941"),
+    true
+  );
+});
+
+test("folder contents are inspected on demand and folder-only activities remain resolvable", async () => {
+  const folder = {
+    id: "folder-only",
+    courseId: "1",
+    course: "Álgebra",
+    section: "Semana 2",
+    type: "folder",
+    title: "Lecturas",
+    url: "https://example/mod/folder/view.php?id=44"
+  };
+  const folderOnlySnapshot = {
+    ...snapshot,
+    activities: [...snapshot.activities, folder]
+  };
+  const calls = [];
+  const { service, cachePath } = await setup({
+    adapter: {
+      async sync() { throw new Error("not called"); },
+      async getFolderContents(input) {
+        calls.push(input);
+        return {
+          folder: input.resource,
+          count: 2,
+          items: [
+            { title: "Semana 1.pdf", relativePath: "Semana 1.pdf" },
+            { title: "Tablas.pdf", relativePath: "Anexos/Tablas.pdf" }
+          ]
+        };
+      }
+    }
+  });
+  await writeFile(cachePath, JSON.stringify(folderOnlySnapshot));
+
+  const queued = await service.getFolderContents({ folder: "folder-only" });
+  assert.equal(queued.data.status, "queued");
+  await service.waitForIdle();
+  const completed = await service.getJobStatus({ jobId: queued.data.jobId });
+
+  assert.equal(completed.data.status, "completed");
+  assert.equal(completed.data.result.count, 2);
+  assert.equal(calls[0].resource.id, "folder-only");
+});
+
 test("download classification, safe course mapping, and manifest deduplication cover visible file types", async () => {
   assert.equal(classifyDownload({ url: "https://x/file.pdf" }).downloadable, true);
   assert.equal(classifyDownload({ contentDisposition: "attachment; filename=slides.pptx" }).extension, ".pptx");

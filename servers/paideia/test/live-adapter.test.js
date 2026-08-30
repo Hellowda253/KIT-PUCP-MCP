@@ -702,6 +702,78 @@ test("a non-downloadable wrapper does not leave empty course folders", async () 
   await assert.rejects(access(path.join(courseRoot, "Empty Section")));
 });
 
+test("folder inspection returns only unique Moodle files with nested relative paths", async () => {
+  let currentUrl = "about:blank";
+  const page = {
+    async goto(url) { currentUrl = url; },
+    url() { return currentUrl; },
+    locator() { return { async count() { return 0; } }; },
+    async evaluate() {
+      return [
+        {
+          url: "https://paideia.invalid/pluginfile.php/10/mod_folder/content/0/Semana%201/Diapositivas.pdf",
+          title: "Diapositivas.pdf"
+        },
+        {
+          url: "https://paideia.invalid/pluginfile.php/10/mod_folder/content/0/Semana%201/Diapositivas.pdf",
+          title: "duplicado"
+        },
+        {
+          url: "https://paideia.invalid/pluginfile.php/10/mod_folder/content/0/Tablas.xlsx",
+          title: "Tablas.xlsx"
+        },
+        { url: "https://evil.example/file.pdf", title: "No permitido" }
+      ];
+    },
+    async close() {}
+  };
+  const adapter = createLivePaideiaAdapter({
+    configLoader: async () => ({
+      user: "fixture-user",
+      pass: "fixture-pass",
+      baseUrl: "https://paideia.invalid",
+      continuingBaseUrl: "",
+      authHosts: ["pandora.pucp.edu.pe"],
+      chromePath: ""
+    }),
+    playwrightLoader: async () => ({
+      chromium: {
+        async launch() {
+          return {
+            async newContext() {
+              return {
+                async newPage() { return page; },
+                async close() {}
+              };
+            },
+            async close() {}
+          };
+        }
+      }
+    })
+  });
+
+  const result = await adapter.getFolderContents({
+    resource: {
+      id: "folder-1",
+      courseId: "1",
+      course: "Termodinámica",
+      section: "Semana 1",
+      type: "folder",
+      kind: "folder",
+      title: "CLASE",
+      url: "https://paideia.invalid/mod/folder/view.php?id=1"
+    },
+    limit: 20
+  });
+
+  assert.equal(result.count, 2);
+  assert.deepEqual(result.items.map(({ title, relativePath }) => ({ title, relativePath })), [
+    { title: "Diapositivas.pdf", relativePath: "Semana 1/Diapositivas.pdf" },
+    { title: "Tablas.xlsx", relativePath: "Tablas.xlsx" }
+  ]);
+});
+
 test("bulk manifest retains successful entries when a later resource fails", async () => {
   const paths = await junctionFixture();
   const manifestPath = path.join(paths.uniRoot, "partial.json");

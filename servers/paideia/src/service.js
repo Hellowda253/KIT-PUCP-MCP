@@ -90,6 +90,7 @@ function safeJobError(error) {
       "network_error",
       "path_not_allowed",
       "resource_not_downloadable",
+      "resource_not_folder",
       "resource_too_large",
       "scrape_failed",
       "timeout",
@@ -106,6 +107,7 @@ function safeJobError(error) {
     network_error: "Paideia returned a network error",
     path_not_allowed: "The Paideia download path is not allowed",
     resource_not_downloadable: "The Paideia resource is not downloadable",
+    resource_not_folder: "The selected Paideia activity is not a Moodle folder",
     resource_too_large: "The Paideia resource exceeds the configured size limit",
     scrape_failed: "The Paideia page could not be extracted safely",
     timeout: "The Paideia operation timed out",
@@ -350,6 +352,25 @@ function findOne(items, query, fields, kind) {
   return candidates[0];
 }
 
+function resourceRows(snapshot) {
+  const rows = [
+    ...(snapshot.activities ?? []).filter(({ type }) =>
+      ["resource", "folder", "url", "page"].includes(type)
+    ),
+    ...(snapshot.materials ?? [])
+  ];
+  return [...new Map(rows.map((item) => [item.id || item.url, item])).values()];
+}
+
+function optionalResource(snapshot, query) {
+  try {
+    return findOne(resourceRows(snapshot), query, ["id", "url", "title"], "resource");
+  } catch (error) {
+    if (error?.code === "resource_not_found") return null;
+    throw error;
+  }
+}
+
 export function createPaideiaService({
   cachePath,
   historyPath,
@@ -461,28 +482,34 @@ export function createPaideiaService({
     return event;
   }
 
+  async function refreshSnapshot(jobId, options = {}) {
+    const previous = await readSnapshot({ optional: true });
+    const components = syncComponents(options);
+    const scraped = await adapter.sync({
+      ...options,
+      components,
+      previousSnapshot: previous,
+      metadataOnly: true
+    });
+    const current = mergeSyncSnapshot(previous, scraped);
+    const normalized = {
+      ...EMPTY,
+      ...current,
+      generatedAt: current.generatedAt ?? now(),
+      retrievedAt: current.retrievedAt ?? current.generatedAt ?? now()
+    };
+    await writeJsonAtomic(cachePath, normalized);
+    const history = await recordSync(jobId, previous, normalized);
+    return { snapshot: normalized, scraped, components, history };
+  }
+
   function startSync(options = {}) {
     if (activeSyncJobId && ["queued", "running"].includes(jobs.get(activeSyncJobId)?.status)) {
       return jobs.get(activeSyncJobId);
     }
     const job = startJob("sync", async (jobId) => {
-      const previous = await readSnapshot({ optional: true });
-      const components = syncComponents(options);
-      const scraped = await adapter.sync({
-        ...options,
-        components,
-        previousSnapshot: previous,
-        metadataOnly: true
-      });
-      const current = mergeSyncSnapshot(previous, scraped);
-      const normalized = {
-        ...EMPTY,
-        ...current,
-        generatedAt: current.generatedAt ?? now(),
-        retrievedAt: current.retrievedAt ?? current.generatedAt ?? now()
-      };
-      await writeJsonAtomic(cachePath, normalized);
-      const history = await recordSync(jobId, previous, normalized);
+      const { snapshot: normalized, scraped, components, history } =
+        await refreshSnapshot(jobId, options);
       return {
         generatedAt: normalized.generatedAt,
         courseCount: normalized.courses.length,
@@ -801,27 +828,7 @@ export function createPaideiaService({
     const course = typeof itemOrCourse === "string"
       ? findOne(snapshot.courses, itemOrCourse, ["id", "name", "shortName"], "course")
       : findOne(snapshot.courses, itemOrCourse.courseId, ["id"], "course");
-    const defaultDestination = courseDestination(course.shortName || course.name, uniRoot);
-    const requestedDestination = options.destination || defaultDestination;
-    let destination;
-    try {
-      validateDownloadDestination(
-        path.isAbsolute(requestedDestination)
-          ? requestedDestination
-          : path.resolve(uniRoot, requestedDestination),
-        uniRoot
-      );
-      destination = resolveAllowedPath(
-        requestedDestination,
-        [path.resolve(uniRoot)]
-      );
-    } catch (error) {
-      throw new McpToolError(
-        "path_not_allowed",
-        "Paideia download destination is outside the safe allowlist",
-        { details: { reason: error.message } }
-      );
-    }
+    const destination = resolveDownloadDestination(course, options.destination);
     const dedupeKey = JSON.stringify({
       kind,
       target:
@@ -887,14 +894,112 @@ export function createPaideiaService({
     }, { ttlSeconds: TTL_SECONDS.materialAdmin });
   }
 
+  function resolveDownloadDestination(course, requested) {
+    const defaultDestination = courseDestination(course.shortName || course.name, uniRoot);
+    const requestedDestination = requested || defaultDestination;
+    try {
+      validateDownloadDestination(
+        path.isAbsolute(requestedDestination)
+          ? requestedDestination
+          : path.resolve(uniRoot, requestedDestination),
+        uniRoot
+      );
+      return resolveAllowedPath(requestedDestination, [path.resolve(uniRoot)]);
+    } catch (error) {
+      throw new McpToolError(
+        "path_not_allowed",
+        "Paideia download destination is outside the safe allowlist",
+        { details: { reason: error.message } }
+      );
+    }
+  }
+
+  function assertDownloadCapacity() {
+    const activeDownloads = [...jobs.values()].filter(
+      (job) =>
+        job.kind.startsWith("download-") &&
+        ["queued", "running"].includes(job.status)
+    ).length;
+    if (activeDownloads >= maxActiveDownloads) {
+      throw new McpToolError(
+        "download_limit_reached",
+        "Too many Paideia download jobs are active",
+        { retryable: true }
+      );
+    }
+  }
+
+  async function startDeferredResourceDownload(options, initialSnapshot) {
+    if (options.destination) {
+      // Validate an explicit path before any remote work starts.
+      resolveDownloadDestination({ name: "Paideia" }, options.destination);
+    }
+    const dedupeKey = JSON.stringify({
+      kind: "download-resource",
+      target: String(options.resource),
+      destination: options.destination || "",
+      overwrite: Boolean(options.overwrite),
+      skipExisting: options.skipExisting !== false
+    });
+    const equivalent = [...jobs.values()].find(
+      (job) => job.dedupeKey === dedupeKey && ["queued", "running"].includes(job.status)
+    );
+    if (equivalent) {
+      return envelope(initialSnapshot, {
+        jobId: equivalent.jobId,
+        status: equivalent.status,
+        destination: options.destination || null
+      }, { ttlSeconds: TTL_SECONDS.materialAdmin });
+    }
+    assertDownloadCapacity();
+    const job = startJob("download-resource", async (jobId) => {
+      const { snapshot: refreshed } = await refreshSnapshot(jobId, {
+        reason: "resource_not_cached",
+        components: SYNC_SCOPES.materials
+      });
+      const material = findOne(
+        resourceRows(refreshed),
+        options.resource,
+        ["id", "url", "title"],
+        "resource"
+      );
+      if (["url", "page"].includes(material.kind || material.type)) {
+        throw new McpToolError(
+          "resource_not_downloadable",
+          "The selected Paideia activity is a link or page, not a downloadable file"
+        );
+      }
+      const course = findOne(refreshed.courses, material.courseId, ["id"], "course");
+      const destination = resolveDownloadDestination(course, options.destination);
+      if (typeof adapter.downloadResource !== "function") {
+        throw new McpToolError("download_unavailable", "Paideia download adapter is unavailable");
+      }
+      return adapter.downloadResource({
+        ...options,
+        course,
+        resource: material,
+        materials: refreshed.materials,
+        destination,
+        overwrite: Boolean(options.overwrite),
+        skipExisting: options.skipExisting !== false,
+        manifestPath,
+        uniRoot
+      });
+    }, { dedupeKey });
+    return envelope(initialSnapshot, {
+      jobId: job.jobId,
+      status: job.status,
+      destination: options.destination || null
+    }, {
+      ttlSeconds: TTL_SECONDS.materialAdmin,
+      warnings: ["The resource was not in the local cache; a focused Paideia refresh will resolve it before downloading."]
+    });
+  }
+
   async function downloadResource(options) {
     const snapshot = await readSnapshot();
-    const material = findOne(
-      snapshot.materials,
-      options.resource,
-      ["id", "url", "title"],
-      "resource"
-    );
+    const material = optionalResource(snapshot, options.resource);
+    if (!material) return startDeferredResourceDownload(options, snapshot);
     if (["url", "page"].includes(material.kind || material.type)) {
       throw new McpToolError(
         "resource_not_downloadable",
@@ -902,6 +1007,51 @@ export function createPaideiaService({
       );
     }
     return startDownload("download-resource", options, material);
+  }
+
+  async function getFolderContents(options) {
+    const snapshot = await readSnapshot();
+    const cached = optionalResource(snapshot, options.folder);
+    const job = startJob("folder-contents", async (jobId) => {
+      let current = snapshot;
+      let folder = cached;
+      if (!folder) {
+        const refreshed = await refreshSnapshot(jobId, {
+          reason: "folder_not_cached",
+          components: SYNC_SCOPES.materials
+        });
+        current = refreshed.snapshot;
+        folder = findOne(
+          resourceRows(current),
+          options.folder,
+          ["id", "url", "title"],
+          "resource"
+        );
+      }
+      if ((folder.kind || folder.type) !== "folder") {
+        throw new McpToolError(
+          "resource_not_folder",
+          "The selected Paideia activity is not a Moodle folder"
+        );
+      }
+      if (typeof adapter.getFolderContents !== "function") {
+        throw new McpToolError(
+          "folder_inspection_unavailable",
+          "Paideia folder inspection is unavailable"
+        );
+      }
+      return adapter.getFolderContents({
+        resource: folder,
+        limit: clamp(options.limit, 100, 500)
+      });
+    }, { dedupeKey: JSON.stringify({ kind: "folder-contents", folder: options.folder }) });
+    return envelope(snapshot, {
+      jobId: job.jobId,
+      status: job.status
+    }, {
+      ttlSeconds: TTL_SECONDS.materialAdmin,
+      warnings: cached ? [] : ["The folder was not in the local cache; a focused refresh will resolve it first."]
+    });
   }
 
   async function downloadCourseMaterials(options) {
@@ -913,6 +1063,7 @@ export function createPaideiaService({
     downloadResource,
     getActivityDetails,
     getCourseOutline,
+    getFolderContents,
     getJobStatus,
     getStatus,
     listActivities,

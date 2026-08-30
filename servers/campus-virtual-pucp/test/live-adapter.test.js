@@ -165,6 +165,106 @@ function config(temporary) {
   };
 }
 
+test("live participant lookup uses the dedicated authenticated roster reader", async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "campus-participants-"));
+  const calls = [];
+  const session = {
+    async authenticate() {
+      calls.push("authenticate");
+      return campusPortal;
+    },
+    async queryCourseParticipants(options) {
+      calls.push(["query", options]);
+      return {
+        url: "https://eros.pucp.edu.pe/pucp/notas/nownotfi/nownotfi?accion=Abrir&vernotas=0&cicloano=2026&ciclo=02&tipociclo=00&clavecurso=IND270",
+        courseCode: "IND270",
+        courseName: "Procesos Industriales",
+        term: "2026-2",
+        html: `<table><tr><th></th><th>Alumno</th><th>Nombre</th><th>Horario</th><th>Especialidad</th><th>E-mail</th><th>Enviar Mail</th></tr><tr><td></td><td>20990001</td><td>Ana Ejemplo</td><td>0731</td><td>Ingeniería Industrial</td><td>ana@example.invalid</td><td></td></tr></table>`
+      };
+    },
+    async close() {
+      calls.push("close");
+    }
+  };
+  const adapter = createLiveCampusAdapter({
+    loadConfig: async () => config(temporary),
+    createSession: async () => session,
+    now: () => "2026-08-24T12:00:00.000Z"
+  });
+
+  const result = await adapter.getCourseParticipants({
+    course: "IND270",
+    schedule: "0731",
+    includeEmail: false,
+    metadataOnly: true,
+    allowDownloads: false,
+    allowMutations: false
+  });
+
+  assert.equal(result.courseCode, "IND270");
+  assert.equal(result.items.length, 1);
+  assert.equal(Object.hasOwn(result.items[0], "institutionalEmail"), false);
+  assert.deepEqual(calls, [
+    "authenticate",
+    ["query", { course: "IND270" }],
+    "close"
+  ]);
+});
+
+test("course-link discovery waits for the asynchronously rendered Campus list", async () => {
+  assert.equal(typeof liveAdapter.readVisibleCourseLinks, "function");
+  let rendered = false;
+  const page = {
+    async waitForFunction(_predicate, _argument, options) {
+      assert.deepEqual(options, { timeout: 45_000 });
+      rendered = true;
+    },
+    locator(selector) {
+      assert.equal(
+        selector,
+        'a[href*="PanelCursoPersonaCiclo"], a[onclick*="PanelCursoPersonaCiclo"]'
+      );
+      return {
+        async evaluateAll() {
+          assert.equal(rendered, true);
+          return [
+            { index: 0, label: "IND270", rowText: "IND270 Curso", navigation: "PanelCursoPersonaCiclo('IND270')" },
+            { index: 1, label: "Curso", rowText: "IND270 Curso", navigation: "PanelCursoPersonaCiclo('IND270')" }
+          ];
+        }
+      };
+    }
+  };
+
+  const result = await liveAdapter.readVisibleCourseLinks(page);
+
+  assert.equal(result[0].rowText, "IND270 Curso");
+  assert.equal(result.length, 1);
+});
+
+test("course roster navigation waits for the Alumnos control after course-page navigation", async () => {
+  assert.equal(typeof liveAdapter.waitForStudentsLink, "function");
+  let waited = false;
+  const link = {
+    first() { return this; },
+    async waitFor(options) {
+      assert.deepEqual(options, { state: "visible", timeout: 45_000 });
+      waited = true;
+    }
+  };
+  const page = {
+    getByText(label, options) {
+      assert.equal(label, "Alumnos");
+      assert.deepEqual(options, { exact: true });
+      return link;
+    }
+  };
+
+  assert.equal(await liveAdapter.waitForStudentsLink(page), link);
+  assert.equal(waited, true);
+});
+
 test("injected live adapter performs metadata-only discovery and known agenda POST with no downloads", async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "campus-live-"));
   const calls = [];
@@ -773,6 +873,49 @@ test("current schedule search falls back to the shared catalog when registration
   assert.equal(result.activeTerm, "2026-2");
   assert.equal(result.items[0].courseCode, "ECO253");
   assert.match(result.warnings[0], /differ/i);
+  assert.deepEqual(calls.slice(0, 2), ["authenticate", "registration"]);
+  assert.equal(calls.some((entry) => Array.isArray(entry) && entry[0] === "catalog"), true);
+});
+
+test("current external academic scope falls back to the shared catalog when enrollment scope is unavailable", async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "campus-registration-external-scope-"));
+  const calls = [];
+  const session = {
+    async authenticate() { calls.push("authenticate"); },
+    async queryRegistrationWorkspace() {
+      calls.push("registration");
+      const error = new Error("External faculty is absent from the enrollment scope");
+      error.code = "schedule_scope_not_found";
+      throw error;
+    },
+    async queryCourseSchedules(options) {
+      calls.push(["catalog", options.term, options.academicScope]);
+      return {
+        url: "https://eros.pucp.edu.pe/pucp/horarios/howcurho/howcurho",
+        html: `<table><tr><th>Clave</th><th>Nombre del curso</th><th>Cr.</th><th>Tipo Hor.</th><th>Hor.</th><th>Profesor</th><th>Sesiones</th></tr><tr><td>1ECO15</td><td>ECONOMÍA</td><td>3</td><td>Cla</td><td>0721</td><td>DOCENTE</td><td>LUN 08:00-10:00 C</td></tr></table>`
+      };
+    },
+    async close() {}
+  };
+  const adapter = createLiveCampusAdapter({
+    loadConfig: async () => config(temporary),
+    createSession: async () => session,
+    now: () => "2026-08-28T12:00:00-05:00"
+  });
+  const result = await adapter.searchCurrentCourseSchedules({
+    term: "2026-2",
+    academicScope: { academicUnit: "CIENCIAS SOCIALES", specialty: "ECONOMÍA" },
+    metadataOnly: true,
+    allowDownloads: false,
+    allowMutations: false,
+    useCampusGenerator: false
+  });
+  assert.equal(result.state, "available");
+  assert.equal(result.source, "schedule_catalog");
+  assert.deepEqual(result.sourcesUsed, ["schedule_catalog"]);
+  assert.equal(result.activeTerm, "2026-2");
+  assert.equal(result.items[0].courseCode, "1ECO15");
+  assert.match(result.warnings[0], /academic scope.*enrollment.*catalog/i);
   assert.deepEqual(calls.slice(0, 2), ["authenticate", "registration"]);
   assert.equal(calls.some((entry) => Array.isArray(entry) && entry[0] === "catalog"), true);
 });

@@ -1,6 +1,6 @@
 {
   "name": "get_course_schedule_details",
-  "description": "Return one active-term course schedule with linked sessions, professor, rooms, modality, survey, and capacity evidence.",
+  "description": "Return one or all active-term sections of a course with linked sessions, professors, rooms, modality, survey, live-or-cached capacity, personal position when published, and explained risk.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -19,8 +19,7 @@
       }
     },
     "required": [
-      "course",
-      "schedule"
+      "course"
     ],
     "additionalProperties": false
   }

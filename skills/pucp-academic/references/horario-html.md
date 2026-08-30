@@ -20,7 +20,8 @@ Construye un JSON UTF-8 con esta estructura:
       "instructor": "Docente",
       "classes": "Lun 08:00–10:00",
       "practice": "—",
-      "exams": "Vie 15:00–18:00"
+      "exams": "Vie 15:00–18:00",
+      "examStatus": "published"
     }
   ],
   "sessions": [
@@ -45,6 +46,13 @@ Construye un JSON UTF-8 con esta estructura:
 claves, secciones, docentes, aulas y sesiones obtenidas del Campus; no las
 inventes.
 
+`examStatus` distingue tres estados: `published` cuando Campus publicó el
+examen y deben existir sus sesiones `type: "exam"`; `not_published` únicamente
+cuando Campus confirma que no hay información de examen publicada; y `unknown`
+cuando todavía falta consultar el detalle. El renderizador rechaza `unknown` y
+también exige `examStatus` si `exams` está vacío. Los datos antiguos que ya
+declaran un examen conservan compatibilidad y se interpretan como publicados.
+
 ## Generación
 
 Sigue este flujo cuando el estudiante pida el archivo:
@@ -53,6 +61,12 @@ Sigue este flujo cuando el estudiante pida el archivo:
    usa `get_student_schedule`; para una opción recomendada parte del resultado
    de `recommend_course_schedules` y consulta cualquier detalle faltante.
 2. Construye el JSON anterior. No copies otro HTML y no escribas uno desde cero.
+   Cada curso que declare exámenes en `courses[].exams` debe tener al menos una
+   sesión independiente con `type: "exam"` y su clave en `courseCodes`; no
+   conviertas el texto de la tabla en una sesión ni omitas las tarjetas rojas.
+   No cambies `exams` a `"-"` para sortear una validación: vuelve a consultar
+   `get_course_schedule_details`. El renderizador devuelve los cursos y horarios
+   faltantes junto con esa acción recomendada.
 3. Separa varios docentes con ` / `; no concatenes sus nombres. Conserva los
    nombres oficiales en el JSON. El renderizador crea etiquetas abreviadas y
    evita mostrar los títulos completamente en mayúsculas.
@@ -77,3 +91,7 @@ publique; y que clases, prácticas y exámenes no hayan sido fusionados. Los
 cruces deben aparecer lado a lado y el contenido completo debe revelarse al
 pasar el puntero o enfocar la tarjeta. Si falta información, vuelve a consultar
 Campus y regenera el archivo; no edites manualmente el HTML para ocultarlo.
+Abre también la vista previa de impresión en A4 horizontal: la cuadrícula debe
+quedar completa en la primera página, sin texto cortado; el detalle tabular va
+en la página siguiente. Activa «Gráficos de fondo» para conservar los colores y
+desactiva «Encabezados y pies de página» para aprovechar toda la hoja.

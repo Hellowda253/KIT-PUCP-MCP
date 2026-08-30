@@ -108,6 +108,7 @@ Consultas de caché:
 Operaciones asíncronas:
 
 - `sync_paideia`
+- `get_paideia_folder_contents`
 - `download_paideia_resource`
 - `download_course_materials`
 - `get_paideia_job_status`
@@ -143,7 +144,16 @@ no existen mapeos personales ni nombres de carpetas especiales. Un destino
 explícito también queda confinado mediante la comprobación léxica y de
 `realpath` común.
 
-Se admiten recursos/archivos y carpetas visibles. Las actividades URL, páginas,
+Se admiten recursos/archivos y carpetas visibles. `get_paideia_folder_contents`
+abre bajo demanda una sola carpeta Moodle y enumera sus archivos y rutas
+relativas sin descargarlos; por ello la sincronización ordinaria puede seguir
+siendo superficial y rápida. Si una carpeta o archivo solicitado todavía no
+está en la caché, la operación ejecuta primero una actualización focalizada de
+catálogo y contenido del curso y continúa automáticamente. También se aceptan
+de forma defensiva carpetas que una versión anterior del caché hubiera guardado
+solo como actividad.
+
+Las actividades URL, páginas,
 foros, tareas y cuestionarios se distinguen como no descargables. Los formatos
 visibles admitidos incluyen PDF, PowerPoint, Word, Excel/CSV, imágenes,
 ZIP/RAR/7z y texto; también se respeta un nombre indicado por

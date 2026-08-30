@@ -19,6 +19,19 @@ Las skills se instalan copiando sus carpetas completas de forma recursiva, no
 solamente `SKILL.md`. Así también quedan disponibles sus `assets/`, referencias,
 scripts y plantillas HTML en cualquier cliente compatible.
 
+### Biblioteca académica opcional
+
+Durante la instalación, el agente puede ofrecer una sola vez configurar una carpeta
+principal para materiales. El usuario puede seleccionar una carpeta existente o
+autorizar la creación de una nueva con el nombre y ubicación que prefiera. Si acepta,
+el agente guarda la ruta absoluta en `PUCP_DOWNLOADS_DIR` dentro de `.env.local`.
+
+La carpeta `.UNI V2` es solamente un ejemplo de organización personal, no un nombre
+ni una estructura obligatoria del kit. El agente no debe crear una carpeta sin
+permiso, cambiar una biblioteca existente ni insistir si el usuario rechaza la
+propuesta. Si la variable queda vacía, se conserva `downloads\Paideia` como destino
+predeterminado dentro del repositorio.
+
 ## Clientes
 
 El generador admite:
@@ -86,7 +99,7 @@ Luego cambia a la etiqueta elegida, reinstala exactamente el lockfile y verifica
 
 ```powershell
 git fetch --tags
-git checkout v0.1.0
+git checkout v0.2.0
 npm ci
 npm test
 npm run doctor

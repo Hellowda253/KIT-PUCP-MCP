@@ -566,6 +566,101 @@ export function createLivePaideiaAdapter({
     );
   }
 
+  async function collectFolderLinks(page) {
+    return page.evaluate(() => {
+      const root =
+        document.querySelector(".foldertree, [data-region='foldertree'], [id^='folder_tree']") ||
+        document.querySelector("main, [role='main'], #region-main");
+      if (!root) return [];
+      return [...root.querySelectorAll('a[href*="pluginfile.php"]')]
+        .filter((anchor) => {
+          const style = window.getComputedStyle(anchor);
+          return style.visibility !== "hidden" && style.display !== "none";
+        })
+        .map((anchor) => ({
+          url: anchor.href,
+          title:
+            anchor.innerText ||
+            anchor.textContent ||
+            anchor.getAttribute("title") ||
+            ""
+        }));
+    });
+  }
+
+  function folderRelativePath(url, title) {
+    try {
+      const segments = decodeURIComponent(new URL(url).pathname)
+        .split("/")
+        .filter(Boolean);
+      const content = segments.findIndex((segment) => segment === "content");
+      if (
+        content > 0 &&
+        segments[content - 1] === "mod_folder" &&
+        segments.length > content + 2
+      ) {
+        return segments
+          .slice(content + 2)
+          .filter((segment) => segment !== "." && segment !== "..")
+          .join("/");
+      }
+      return decodeURIComponent(path.basename(new URL(url).pathname)) || String(title).trim();
+    } catch {
+      return String(title).trim();
+    }
+  }
+
+  async function getFolderContents(options) {
+    if ((options.resource?.kind || options.resource?.type) !== "folder") {
+      throw paideiaError(
+        "resource_not_folder",
+        "The selected Paideia activity is not a Moodle folder"
+      );
+    }
+    return withSession(async ({ page, policy }) => {
+      await safeGoto(page, options.resource.url, policy, {
+        waitUntil: "domcontentloaded",
+        timeout: 45_000
+      });
+      const links = await collectFolderLinks(page);
+      const unique = [];
+      const seen = new Set();
+      for (const link of links) {
+        try {
+          const url = policy.assertFileEndpoint(link.url).href;
+          if (seen.has(url)) continue;
+          seen.add(url);
+          const relativePath = folderRelativePath(url, link.title);
+          unique.push({
+            id: `folder-file-${createHash("sha256").update(url).digest("hex").slice(0, 16)}`,
+            title: path.basename(relativePath) || String(link.title).trim(),
+            relativePath,
+            type: "resource",
+            kind: "resource",
+            url
+          });
+        } catch {
+          // Ignore navigation, form, and foreign links embedded in the folder page.
+        }
+      }
+      const limit = Math.min(Math.max(Number(options.limit || 100), 1), 500);
+      return {
+        folder: {
+          id: options.resource.id,
+          courseId: options.resource.courseId,
+          course: options.resource.course,
+          section: options.resource.section,
+          title: options.resource.title,
+          url: options.resource.url
+        },
+        count: unique.length,
+        returnedCount: Math.min(unique.length, limit),
+        truncated: unique.length > limit,
+        items: unique.slice(0, limit)
+      };
+    });
+  }
+
   async function downloadResponse(
     context,
     link,
@@ -846,5 +941,5 @@ export function createLivePaideiaAdapter({
     );
   }
 
-  return { sync, downloadResource, downloadCourseMaterials };
+  return { sync, getFolderContents, downloadResource, downloadCourseMaterials };
 }

@@ -18,7 +18,7 @@ export function createPaideiaServer(options = {}) {
   } = options;
   return createStdioMcpServer({
     name: "pucp-paideia",
-    version: "0.1.0",
+    version: "0.2.0",
     tools: createPaideiaTools(service),
     ...transportOptions
   });

@@ -378,7 +378,7 @@
     @page { size: A4 landscape; margin: 8mm; }
 
     @media print {
-      :root { --hour-height: 30px; }
+      :root { --hour-height: 38px; }
       body.theme-dark {
         --bg-page: #fff;
         --bg-surface: #fff;
@@ -402,8 +402,30 @@
       .sub-bar { padding: 7px 10px; }
       .timetable-card { display: block !important; overflow: visible; break-inside: avoid; }
       .timetable-grid { min-width: 0; grid-template-columns: 52px repeat(6, minmax(0, 1fr)); }
-      .event-title { font-size: 0.61rem; }
-      .event-details { font-size: 0.56rem; }
+      .event-top { padding: 1px 3px; font-size: 0.56rem; line-height: 1.1; }
+      .event-content { justify-content: flex-start; gap: 1px; padding: 2px 4px; }
+      .event-code { font-size: 0.58rem; line-height: 1.1; }
+      .event-title {
+        display: -webkit-box;
+        overflow: hidden;
+        font-size: 0.58rem;
+        line-height: 1.1;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+      }
+      .event-details {
+        display: -webkit-box;
+        margin-top: auto;
+        overflow: hidden;
+        font-size: 0.52rem;
+        line-height: 1.1;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+      }
+      .event-box.event-short .event-title,
+      .event-box.event-short .event-details { -webkit-line-clamp: 1; line-clamp: 1; }
       .data-card { break-before: page; box-shadow: none; }
     }
   </style>
@@ -623,6 +645,7 @@
             event.style.width = `calc(${100 / lanes}% - 6px)`;
             event.dataset.startMinutes = String(start);
             event.dataset.endMinutes = String(end);
+            event.classList.toggle("event-short", end - start <= 60);
             event.tabIndex = 0;
             event.setAttribute("aria-label", `${TYPE_LABELS[session.type]} ${sessionLabel(session)}, ${session.start} a ${session.end}`);
             event.append(element("div", "event-top", `${session.start} – ${session.end}${session.weeksLabel ? ` (${session.weeksLabel})` : ""}`));

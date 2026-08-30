@@ -1,6 +1,6 @@
 {
   "name": "search_course_schedules",
-  "description": "Search the active term using the live registration view when available and otherwise the shared PUCP schedule catalog; never accepts a term or uses historical data.",
+  "description": "Search the active term using the live registration view when available and otherwise the shared PUCP schedule catalog; never accepts a term or uses historical data. For courses from other academic units in the active term, keep using this tool: it automatically falls back to the schedule catalog when the personalized enrollment scope cannot represent them. A schedule id or code such as 0721 does not determine curriculum level. Use only the explicit Campus level: a positive level identifies its mandatory courses and Nivel 0 identifies electives; if absent, report the classification as unknown.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -34,7 +34,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 30,
-            "description": "Official curriculum level shown by Campus; Nivel 0 contains Cursos Electivos. Requires specialty and is never inferred from course codes."
+            "description": "Official curriculum level shown by Campus. A positive level identifies mandatory courses of that level; Nivel 0 contains Cursos Electivos. Requires specialty and is never inferred from a course or schedule code."
           }
         },
         "required": [

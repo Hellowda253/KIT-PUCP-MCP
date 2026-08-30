@@ -1,6 +1,6 @@
 {
   "name": "search_historical_course_schedules",
-  "description": "Search the shared PUCP schedule catalog for an explicitly requested historical term; results are never used for active enrollment or registration writes.",
+  "description": "Search the shared PUCP schedule catalog for an explicitly requested historical term; results are never used for active enrollment or registration writes. Classify mandatory courses and electives only from the explicit Campus curriculum level, never from a schedule id such as 0721.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -35,7 +35,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 30,
-            "description": "Official curriculum level shown by the historical report; Nivel 0 contains Cursos Electivos."
+            "description": "Official curriculum level shown by the historical report. A positive level identifies mandatory courses of that level; Nivel 0 contains Cursos Electivos; schedule ids do not define the level."
           }
         },
         "required": [

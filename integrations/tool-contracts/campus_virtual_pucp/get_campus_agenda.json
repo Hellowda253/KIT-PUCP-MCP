@@ -1,6 +1,6 @@
 {
   "name": "get_campus_agenda",
-  "description": "Query cached Campus agenda events by inclusive date range, course, or comma-separated kinds.",
+  "description": "Query confirmed Campus agenda events by inclusive date range, course, or comma-separated kinds. Use this for the next class or dated events; if one day is empty, widen the range instead of substituting the recurring weekly schedule.",
   "parameters": {
     "type": "object",
     "properties": {
