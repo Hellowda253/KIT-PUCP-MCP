@@ -15,6 +15,8 @@ Prioriza: reglas y materiales del curso; evidencia actual de Campus o Paideia; f
 
 ## Elegir la intervención
 
+Para preparar la próxima clase o decidir qué estudiar esta semana, usa la orientación «Semana del ciclo y avance del curso» de `pucp-academic` antes de elegir materiales. Contrasta calendario, cronograma y anuncios; no asumas semana 1 ni equipares semana y unidad. No hagas esta comprobación para una duda conceptual independiente.
+
 - Pregunta factual: responde directamente.
 - Concepto: conecta intuición, definición, mecanismo y uso; añade un ejemplo solo si aclara.
 - Ejercicio: identifica datos, objetivo y restricciones; justifica el método, desarrolla pasos reconstruibles y comprueba el resultado.

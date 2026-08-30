@@ -10,6 +10,7 @@ Resuelve consultas académicas personales con los tres servidores del kit. Carga
 - Para una vista conjunta o una pregunta que cruza fuentes, usa `pucp_academic_overview`.
 - Para cursos, actividades, anuncios, calificaciones visibles y materiales de Paideia, lee [Paideia](references/paideia.md).
 - Para agenda, horario propio, notas oficiales, historia, rendimiento, currículo, documentos o información financiera, lee [Campus Virtual](references/campus-virtual.md).
+- Para saber de qué trata la próxima clase o qué estudiar esta semana, aplica «Semana del ciclo y avance del curso» en [Campus Virtual](references/campus-virtual.md) antes de elegir materiales.
 - Para matrícula, cursos permitidos, vacantes, búsqueda, comparación o cambios de inscripción, lee [matrícula y horarios](references/matricula-y-horarios.md).
 - Para crear un horario visual, lee [horario HTML](references/horario-html.md) y usa el renderizador incluido. No escribas un HTML propio desde cero.
 
