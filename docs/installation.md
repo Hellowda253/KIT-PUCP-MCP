@@ -99,7 +99,7 @@ Luego cambia a la etiqueta elegida, reinstala exactamente el lockfile y verifica
 
 ```powershell
 git fetch --tags
-git checkout v0.2.0
+git checkout v0.3.0
 npm ci
 npm test
 npm run doctor

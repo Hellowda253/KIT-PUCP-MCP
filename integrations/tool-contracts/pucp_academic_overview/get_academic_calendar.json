@@ -1,0 +1,34 @@
+{
+  "name": "get_academic_calendar",
+  "description": "Read locally registered program/term calendars and compute weeks from the current server clock in America/Lima. Optional date computes a separate reference week. No Campus session or terminal required. Missing calendars must be verified at an official source before registration.",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "calendarId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "course": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "term": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "program": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "date": {
+        "type": "string",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      }
+    }
+  }
+}

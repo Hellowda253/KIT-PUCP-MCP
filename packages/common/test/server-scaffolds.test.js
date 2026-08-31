@@ -16,7 +16,7 @@ test("Campus Virtual implementation exposes its non-empty MCP tool registry", as
   assert.equal(response.result.tools.length, 33);
 });
 
-test("academic overview implementation exposes its five MCP tools", async () => {
+test("academic overview implementation exposes its seven MCP tools", async () => {
   const server = createOverviewServer();
   const response = await server.handleMessage({
     jsonrpc: "2.0",
@@ -25,5 +25,5 @@ test("academic overview implementation exposes its five MCP tools", async () => 
     params: {}
   });
 
-  assert.equal(response.result.tools.length, 5);
+  assert.equal(response.result.tools.length, 7);
 });

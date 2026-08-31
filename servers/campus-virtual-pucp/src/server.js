@@ -1,7 +1,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { createStdioMcpServer } from "@pucp-academic-mcp/common";
+import { createStdioMcpServer, createAcademicCalendarStore, withAcademicContext } from "@pucp-academic-mcp/common";
 
 import { defaultCampusPaths } from "./config.js";
 import { createLiveCampusAdapter } from "./live-adapter.js";
@@ -10,6 +10,7 @@ import { createCampusTools } from "./tools.js";
 
 export function createCampusVirtualServer(options = {}) {
   const {
+    calendarStore = createAcademicCalendarStore(),
     service = createCampusService({
       ...defaultCampusPaths(),
       adapter: createLiveCampusAdapter()
@@ -18,8 +19,8 @@ export function createCampusVirtualServer(options = {}) {
   } = options;
   return createStdioMcpServer({
     name: "pucp-campus-virtual",
-    version: "0.2.0",
-    tools: createCampusTools(service),
+    version: "0.3.0",
+    tools: withAcademicContext(createCampusTools(service), calendarStore),
     ...transportOptions
   });
 }

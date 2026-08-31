@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 - 2026-08-31
+
+- Añade `get_academic_calendar` y `set_academic_calendar`: registro local de calendarios revisados por el agente, con alcance de programa, ciclo y cursos.
+- Calcula la semana en cada consulta desde el reloj de America/Lima, separada de la fecha de caché y de la semana de una sesión futura o pasada.
+- Admite verano, intensivos, intervalos publicados y semanas desconocidas sin inventar fechas.
+- Añade contexto temporal y coincidencias de etiquetas de semanas a las respuestas académicas, sin ocultar materiales ni inferir el avance docente.
+- Refuerza las skills para seleccionar materiales según fecha, semana y evidencia. Conserva el registro de calendarios fuera de Git.
+- Actualiza contratos y pruebas de protocolo, reloj, límites y aislamiento.
+
 ## 0.2.0 - 2026-08-29
 
 ### Campus Virtual

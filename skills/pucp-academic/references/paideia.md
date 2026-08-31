@@ -13,6 +13,8 @@ Si Educación Continua está `unavailable` o en `cooldown`, conserva los resulta
 
 ## Descargas y límites
 
+Para materiales de la semana o próxima clase, revisa `academicContext` y sigue [semana y avance](campus-virtual.md). Usa `referenceDate` para la fecha de la próxima sesión: nunca selecciones la primera sección visible por defecto.
+
 `search_materials` descubre recursos y carpetas del curso, pero no abre el
 contenido interno de una carpeta Moodle. Si el usuario quiere saber qué hay
 dentro, llama `get_paideia_folder_contents`, espera el trabajo con

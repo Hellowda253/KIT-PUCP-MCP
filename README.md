@@ -4,7 +4,9 @@ Kit MCP comunitario y local para estudiantes de la
 Pontificia Universidad Católica del Perú. Integra Paideia, Campus Virtual PUCP
 y un resumen académico combinado para asistentes compatibles con MCP.
 
-Versión estable actual: **0.2.0**. Consulta el [historial de cambios](CHANGELOG.md).
+Versión estable actual: **0.3.0**. Consulta el [historial de cambios](CHANGELOG.md).
+
+Incluye [contexto de semana académica](docs/academic-calendar.md): calendarios por programa/ciclo, cálculo desde el reloj actual y orientación para seleccionar materiales de la semana o próxima clase. El calendario se registra tras verificar una fuente oficial; admite verano e intensivos sin extrapolar el calendario regular.
 
 > Proyecto comunitario no oficial. No está afiliado, respaldado ni operado por
 > la PUCP. Cada estudiante ejecuta el servidor en su propio equipo y usa sus

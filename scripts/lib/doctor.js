@@ -174,7 +174,7 @@ export async function smokeStdioServer({ id, entrypoint, repositoryRoot }) {
         params: {
           protocolVersion: "2024-11-05",
           capabilities: {},
-          clientInfo: { name: "pucp-mcp-doctor", version: "0.2.0" }
+          clientInfo: { name: "pucp-mcp-doctor", version: "0.3.0" }
         }
       })}\n${JSON.stringify({
         jsonrpc: "2.0",

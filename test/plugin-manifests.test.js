@@ -20,8 +20,8 @@ test("plugin manifests package PUCP skills without embedding secrets", async () 
 
   assert.equal(codex.name, "pucp-mcp");
   assert.equal(claude.name, "pucp-mcp");
-  assert.equal(codex.version, "0.2.0");
-  assert.equal(claude.version, "0.2.0");
+  assert.equal(codex.version, "0.3.0");
+  assert.equal(claude.version, "0.3.0");
   assert.equal(codex.skills, "./skills/");
   assert.doesNotMatch(
     JSON.stringify({ codex, claude }),

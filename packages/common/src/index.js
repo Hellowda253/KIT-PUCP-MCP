@@ -10,6 +10,7 @@ export {
 } from "./contracts.js";
 export { loadEnv, parseEnv } from "./env.js";
 export { createEnvelope } from "./envelope.js";
+export { createAcademicCalendarStore, createAcademicCalendarTools, withAcademicContext } from "./academic-calendar.js";
 export { McpToolError, toToolErrorResult } from "./errors.js";
 export { TTL_SECONDS, cacheFreshness, shouldRefresh } from "./freshness.js";
 export { readJsonCache, writeJsonAtomic } from "./json-cache.js";

@@ -1,0 +1,125 @@
+{
+  "name": "set_academic_calendar",
+  "description": "Register or replace one LOCAL program calendar after inspecting its official public PUCP source. Include class start/end, applicable term/program, explicit course ids/codes/names and a short non-personal evidence excerpt. Use separate summer/intensive calendars and published week intervals when available. Does not alter Campus. Verification is caller-reported, not independently checked by the server.",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "calendar"
+    ],
+    "properties": {
+      "calendar": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "term",
+          "program",
+          "kind",
+          "startDate",
+          "endDate",
+          "courseKeys",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,79}$"
+          },
+          "term": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "program": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "regular",
+              "summer",
+              "intensive",
+              "continuing"
+            ]
+          },
+          "startDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "endDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "courseKeys": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url",
+              "title",
+              "evidence"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "maxLength": 1000
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 10,
+                "maxLength": 1500
+              }
+            }
+          },
+          "weeks": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 60,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "number",
+                "start",
+                "end"
+              ],
+              "properties": {
+                "number": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 60
+                },
+                "start": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                },
+                "end": {
+                  "type": "string",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

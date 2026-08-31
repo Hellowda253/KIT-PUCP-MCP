@@ -1,7 +1,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { createStdioMcpServer } from "@pucp-academic-mcp/common";
+import { createStdioMcpServer, createAcademicCalendarStore, withAcademicContext } from "@pucp-academic-mcp/common";
 
 import { createLivePaideiaAdapter } from "./live-adapter.js";
 import { defaultPaideiaPaths } from "./config.js";
@@ -10,6 +10,7 @@ import { createPaideiaTools } from "./tools.js";
 
 export function createPaideiaServer(options = {}) {
   const {
+    calendarStore = createAcademicCalendarStore(),
     service = createPaideiaService({
       ...defaultPaideiaPaths(),
       adapter: createLivePaideiaAdapter()
@@ -18,8 +19,8 @@ export function createPaideiaServer(options = {}) {
   } = options;
   return createStdioMcpServer({
     name: "pucp-paideia",
-    version: "0.2.0",
-    tools: createPaideiaTools(service),
+    version: "0.3.0",
+    tools: withAcademicContext(createPaideiaTools(service), calendarStore),
     ...transportOptions
   });
 }

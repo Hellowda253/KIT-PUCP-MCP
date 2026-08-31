@@ -26,7 +26,8 @@ function publicToolDefinition(tool) {
   return {
     name: tool.name,
     description: tool.description ?? "",
-    inputSchema: tool.inputSchema ?? { type: "object" }
+    inputSchema: tool.inputSchema ?? { type: "object" },
+    ...(tool.annotations ? { annotations: tool.annotations } : {})
   };
 }
 
