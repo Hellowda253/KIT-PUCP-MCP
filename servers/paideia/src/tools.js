@@ -5,6 +5,8 @@ const refreshProperties = {
   }
 };
 
+const highStakesTopicPolicy = "For an assignment or TA, practical, lab, or exam topic, use authorized email > explicit Paideia instructions > current syllabus > materials. Stop on a clear instruction and label the result confirmed, scheduled, or inferred. An ordinary class uses the fast academic-week flow.";
+
 const filterProperties = {
   course: { type: "string", minLength: 1 },
   section: { type: "string", minLength: 1 },
@@ -68,7 +70,7 @@ export function createPaideiaTools(service) {
     },
     {
       name: "get_course_outline",
-      description: "Return cached sections and compact activity samples for one unambiguous course.",
+      description: `Return cached sections and compact activity samples for one unambiguous course. ${highStakesTopicPolicy}`,
       inputSchema: schema({
         course: { type: "string", minLength: 1 },
         maxSections: { type: "integer", minimum: 1, maximum: 60 },
@@ -88,7 +90,7 @@ export function createPaideiaTools(service) {
     },
     {
       name: "get_activity_details",
-      description: "Return cached safe overview details for an assignment or quiz; never opens an attempt.",
+      description: "Return cached safe overview details for an assignment or quiz as explicit Paideia evidence; never opens an attempt.",
       inputSchema: schema({
         activity: { type: "string", minLength: 1 },
         ...refreshProperties
@@ -139,7 +141,7 @@ export function createPaideiaTools(service) {
     },
     {
       name: "search_materials",
-      description: "Search cached material metadata; does not download or open files.",
+      description: "Search cached material metadata; does not download or open files. For a TA, practical, lab, or exam topic, materials are last-resort evidence rather than confirmed instructions.",
       inputSchema: schema({
         ...filterProperties,
         limit: { type: "integer", minimum: 1, maximum: 80 }

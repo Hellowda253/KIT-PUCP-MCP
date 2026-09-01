@@ -131,6 +131,18 @@ test("high-stakes academic activities use a strict evidence ladder without slowi
   assert.match(professor, /jerarqu[ií]a estricta|evidencia estricta/iu);
 });
 
+test("MCP tool metadata carries the same evidence policy for clients without skills", async () => {
+  const paideiaTools = await read("servers/paideia/src/tools.js");
+  const overviewTools = await read("servers/overview/src/tools.js");
+  const combined = `${paideiaTools}\n${overviewTools}`;
+
+  assert.match(combined, /assignment.*practical.*lab.*exam/isu);
+  assert.match(combined, /authorized email.*Paideia.*syllabus.*materials/isu);
+  assert.match(combined, /ordinary class.*fast/isu);
+  assert.match(combined, /materials.*last resort|last-resort.*materials/isu);
+  assert.match(combined, /confirmed.*scheduled.*inferred/isu);
+});
+
 test("installation offers an optional academic library without imposing .UNI V2", async () => {
   const agents = await read("AGENTS.md");
   const installation = await read("docs/installation.md");

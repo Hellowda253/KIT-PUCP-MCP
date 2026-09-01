@@ -19,6 +19,8 @@ const dateRange = {
   limit: { type: "integer", minimum: 1, maximum: 200 }
 };
 
+const highStakesTopicPolicy = "For an assignment or TA, practical, lab, or exam topic, use authorized email > explicit Paideia instructions > current syllabus > materials. Stop on a clear instruction and label the result confirmed, scheduled, or inferred. An ordinary class uses the fast academic-week flow.";
+
 export function createOverviewTools(service) {
   return [
     tool(
@@ -29,7 +31,7 @@ export function createOverviewTools(service) {
     ),
     tool(
       "get_course_workspace",
-      "Return one course workspace combining Paideia materials and pending work with Campus schedule and official grades.",
+      `Return one course workspace combining Paideia materials and pending work with Campus schedule and official grades. ${highStakesTopicPolicy}`,
       { course: { type: "string", minLength: 1 } },
       (args) => service.getCourseWorkspace(args),
       ["course"]
