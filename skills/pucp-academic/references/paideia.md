@@ -15,6 +15,14 @@ Si Educación Continua está `unavailable` o en `cooldown`, conserva los resulta
 
 Para materiales de la semana o próxima clase, revisa `academicContext` y sigue [semana y avance](campus-virtual.md). Usa `referenceDate` para la fecha de la próxima sesión: nunca selecciones la primera sección visible por defecto.
 
+Cuando el usuario pregunte por el tema o las indicaciones de una TA, tarea
+académica, práctica, laboratorio o examen, aplica íntegramente «Tema de tareas,
+prácticas, laboratorios y exámenes» en [Campus Virtual](campus-virtual.md). En
+Paideia busca primero anuncios y el detalle de la actividad; después inspecciona
+secciones, carpetas y documentos explícitos de programación, indicaciones o
+sesiones. No sustituyas esas indicaciones por una inferencia basada en el primer
+material encontrado.
+
 `search_materials` descubre recursos y carpetas del curso, pero no abre el
 contenido interno de una carpeta Moodle. Si el usuario quiere saber qué hay
 dentro, llama `get_paideia_folder_contents`, espera el trabajo con

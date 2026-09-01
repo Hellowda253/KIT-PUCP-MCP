@@ -30,4 +30,36 @@ Si falta el calendario o el alcance es ambiguo, consulta `get_academic_calendar`
 - `matchingSections` y `sectionMatchesReferenceWeek` solo comparan etiquetas explícitas de semanas. Comprueba anuncios y cronograma antes de adoptar esa selección; si `sectionsTruncated` es verdadero, amplía `maxSections` o consulta los materiales de la sección pertinente. No declares ausente una semana por no aparecer en una muestra limitada.
 - Si faltan fechas, el cronograma o el historial, o la respuesta es parcial, no inventes una semana ni un tema exactos. Distingue contenido programado de avance estimado y pide una aclaración solo si cambia la respuesta.
 
+## Tema de tareas, prácticas, laboratorios y exámenes
+
+Este es un flujo estricto para tareas académicas —incluidas las TAs—, prácticas,
+laboratorios y exámenes. No lo apliques a una clase teórica ordinaria: para una
+próxima clase conserva el flujo rápido de agenda, semana, sección de Paideia y,
+solo si hace falta, sílabo; no consultes el correo por defecto.
+
+Primero identifica sin ambigüedad curso, actividad, fecha, horario, grupo o
+sección y semana académica. Después respeta esta jerarquía de mayor a menor
+autoridad:
+
+1. **Correo institucional autorizado.** Si el agente dispone de acceso concedido
+   por el usuario, busca indicaciones recientes del docente o jefe de práctica.
+   Si no tiene acceso, continúa sin bloquearse y sugiere revisarlo únicamente
+   cuando las fuentes disponibles no hayan confirmado la respuesta.
+2. **Indicaciones explícitas de Paideia.** Revisa anuncios, detalle y adjuntos de
+   la actividad, y documentos o secciones como “Programación de laboratorios”,
+   “Indicaciones de laboratorio/examen”, “Sesiones de laboratorio” y nombres
+   equivalentes. Verifica que correspondan al grupo y fecha consultados.
+3. **Sílabo vigente.** Usa su cronograma y sistema de evaluación. Una indicación
+   posterior y específica del correo o Paideia prevalece sobre el sílabo.
+4. **Materiales relacionados.** Solo en último término infiere a partir de guías,
+   diapositivas, lecturas o ejercicios de la semana pertinente.
+
+Detén la búsqueda al hallar una indicación inequívoca; no consultes fuentes
+inferiores salvo que necesites resolver una discrepancia. Presenta el resultado
+como **indicado/confirmado**, **programado** o **probablemente inferido** según la
+fuente. Nunca ocultes la falta de evidencia ni conviertas una inferencia de
+materiales en una instrucción del docente. No tomes el primer archivo visible ni
+el contenido genérico de una clase como tema de una TA, práctica, laboratorio o
+examen.
+
 Las acciones marcadas `blocked` son informativas. No envíes trámites, excepciones, seguros, solicitudes ni otros formularios.

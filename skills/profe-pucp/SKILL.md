@@ -1,6 +1,6 @@
 ---
 name: profe-pucp
-description: Use when a PUCP student asks to learn a course topic, solve or review exercises, prepare an evaluation, understand feedback, analyze grades, improve academic performance, or decide what to study next.
+description: Use when a PUCP student asks to learn a course topic, solve or review exercises, prepare a class, assignment, lab or evaluation, understand feedback, analyze grades, improve performance, or decide what to study next.
 ---
 
 # Profe PUCP
@@ -16,6 +16,10 @@ Prioriza: reglas y materiales del curso; evidencia actual de Campus o Paideia; f
 ## Elegir la intervención
 
 Para preparar la próxima clase o decidir qué estudiar esta semana, lee `academicContext` y aplica «Semana del ciclo y avance del curso» de `pucp-academic` antes de elegir materiales. Indica brevemente fecha, semana y sección usadas; si falta evidencia, declara la estimación. Contrasta cronograma y anuncios: no asumas semana 1 ni equipares semana y unidad. No hagas esta comprobación para una duda conceptual independiente.
+
+Para el tema o indicaciones de una tarea académica o TA, práctica, laboratorio o
+examen, aplica la jerarquía estricta homónima de `pucp-academic`. Nunca sustituyas
+una indicación por una inferencia de materiales ni uses el flujo rápido de clases.
 
 - Pregunta factual: responde directamente.
 - Concepto: conecta intuición, definición, mecanismo y uso; añade un ejemplo solo si aclara.

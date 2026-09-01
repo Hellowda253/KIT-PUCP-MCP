@@ -112,6 +112,25 @@ test("Profe PUCP is a focused teaching workflow that requests academic context s
   assert.match(ui, /\$profe-pucp/u);
 });
 
+test("high-stakes academic activities use a strict evidence ladder without slowing ordinary classes", async () => {
+  const academic = await read("skills/pucp-academic/references/campus-virtual.md");
+  const paideia = await read("skills/pucp-academic/references/paideia.md");
+  const professor = await read("skills/profe-pucp/SKILL.md");
+  const combined = `${academic}\n${paideia}`;
+
+  assert.match(combined, /tareas acad[eé]micas.*pr[aá]cticas.*laboratorios.*ex[aá]menes/isu);
+  assert.match(combined, /correo institucional.*Paideia.*s[ií]labo.*materiales/isu);
+  assert.match(combined, /correo.*(?:sin acceso|no.*acceso).*sugi/isu);
+  assert.match(combined, /indicaciones.*programaci[oó]n.*sesiones/isu);
+  assert.match(combined, /clase.*flujo (?:r[aá]pido|actual).*no.*correo/isu);
+  assert.match(combined, /det[eé]n|detener|no.*consultar.*fuentes inferiores/isu);
+  assert.match(combined, /indicado|confirmado/iu);
+  assert.match(combined, /programado/iu);
+  assert.match(combined, /probablemente|inferido/iu);
+  assert.match(professor, /tarea.*pr[aá]ctica.*laboratorio.*examen/isu);
+  assert.match(professor, /jerarqu[ií]a estricta|evidencia estricta/iu);
+});
+
 test("installation offers an optional academic library without imposing .UNI V2", async () => {
   const agents = await read("AGENTS.md");
   const installation = await read("docs/installation.md");
