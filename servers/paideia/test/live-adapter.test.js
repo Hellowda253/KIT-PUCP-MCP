@@ -271,6 +271,137 @@ test("sync visits both Paideia areas with the same browser context", async () =>
   ]);
 });
 
+test("catalog synchronization obtains current and past courses from Moodle timeline AJAX", async () => {
+  const classifications = [];
+  const makePage = () => {
+    let currentUrl = "about:blank";
+    return {
+      async goto(url) { currentUrl = url; },
+      url() { return currentUrl; },
+      locator() { return { async count() { return 0; } }; },
+      async content() {
+        return '<body id="page-my-courses"><div data-region="course-content"></div></body>';
+      },
+      async evaluate(_callback, input) {
+        classifications.push(...input.classifications);
+        return [
+          {
+            classification: "inprogress",
+            courses: [{ id: 101, fullname: "2026-2 Simulación (IND123)", viewurl: `${input.baseUrl}/course/view.php?id=101` }]
+          },
+          {
+            classification: "future",
+            courses: []
+          },
+          {
+            classification: "past",
+            courses: [{ id: 303, fullname: "2023-1 Fundamentos de Cálculo (1MAT05)", viewurl: `${input.baseUrl}/course/view.php?id=303` }]
+          }
+        ];
+      },
+      async close() {}
+    };
+  };
+  const adapter = createLivePaideiaAdapter({
+    configLoader: async () => ({
+      user: "fixture-user",
+      pass: "fixture-pass",
+      baseUrl: "https://paideia.invalid",
+      continuingBaseUrl: "",
+      authHosts: ["pandora.pucp.edu.pe"],
+      chromePath: ""
+    }),
+    playwrightLoader: async () => ({
+      chromium: {
+        async launch() {
+          return {
+            async newContext() {
+              return { async newPage() { return makePage(); }, async close() {} };
+            },
+            async close() {}
+          };
+        }
+      }
+    })
+  });
+
+  const snapshot = await adapter.sync({ components: ["catalog"] });
+
+  assert.deepEqual(classifications, ["inprogress", "future", "past"]);
+  assert.deepEqual(snapshot.courses.map(({ id }) => id), ["303", "101"]);
+  assert.equal(snapshot.areaStates[0].courseCount, 2);
+});
+
+test("course-specific synchronization opens only the requested past course", async () => {
+  const visited = [];
+  const makePage = () => {
+    let currentUrl = "about:blank";
+    return {
+      async goto(url) { currentUrl = url; visited.push(url); },
+      url() { return currentUrl; },
+      locator() { return { async count() { return 0; } }; },
+      async content() {
+        if (/\/course\/view\.php/.test(currentUrl)) {
+          return '<body id="page-course-view"><li class="section"><h3 class="sectionname">Semana 1</h3><a href="/mod/resource/view.php?id=501">Guía</a></li></body>';
+        }
+        return '<body id="page-my-courses"><div data-region="course-content"></div></body>';
+      },
+      async evaluate(_callback, input) {
+        return [
+          {
+            classification: "inprogress",
+            courses: [{ id: 101, fullname: "2026-2 Simulación (IND123)", viewurl: `${input.baseUrl}/course/view.php?id=101` }]
+          },
+          {
+            classification: "future",
+            courses: []
+          },
+          {
+            classification: "past",
+            courses: [{ id: 303, fullname: "2023-1 Fundamentos de Cálculo (1MAT05)", viewurl: `${input.baseUrl}/course/view.php?id=303` }]
+          }
+        ];
+      },
+      async close() {}
+    };
+  };
+  const adapter = createLivePaideiaAdapter({
+    configLoader: async () => ({
+      user: "fixture-user",
+      pass: "fixture-pass",
+      baseUrl: "https://paideia.invalid",
+      continuingBaseUrl: "",
+      authHosts: ["pandora.pucp.edu.pe"],
+      chromePath: ""
+    }),
+    playwrightLoader: async () => ({
+      chromium: {
+        async launch() {
+          return {
+            async newContext() {
+              return { async newPage() { return makePage(); }, async close() {} };
+            },
+            async close() {}
+          };
+        }
+      }
+    })
+  });
+
+  const snapshot = await adapter.sync({
+    components: ["catalog", "course_content"],
+    course: "Fundamentos de Cálculo"
+  });
+
+  assert.deepEqual(
+    visited.filter((url) => /\/course\/view\.php/.test(url)),
+    ["https://paideia.invalid/course/view.php?id=303"]
+  );
+  assert.equal(snapshot.materials[0].courseId, "303");
+  assert.deepEqual(snapshot.coverage.courseIds, ["303"]);
+  assert.equal(snapshot.coverage.allCourses, false);
+});
+
 test("component sync avoids unrelated Paideia course, detail, forum, and grade pages", async () => {
   const dashboardHtml = await readFile(new URL("./fixtures/dashboard.html", import.meta.url), "utf8");
   const courseHtml = await readFile(new URL("./fixtures/course.html", import.meta.url), "utf8");

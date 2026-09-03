@@ -247,9 +247,14 @@ function mergeSyncSnapshot(previous, current) {
         return prior ? { ...course, sections: prior.sections ?? [] } : course;
       });
     const activeCourseIds = new Set(courses.map(({ id }) => id));
+    const coveredCourseIds = new Set(coverage.courseIds ?? []);
     const refreshedCourseIds = new Set(
       currentCourses
-        .filter((course) => availableAreas.has(course.area) && !failed.has(course.id))
+        .filter((course) =>
+          availableAreas.has(course.area) &&
+          !failed.has(course.id) &&
+          (coverage.allCourses || coveredCourseIds.has(course.id))
+        )
         .map(({ id }) => id)
     );
     const mergeRows = (field) => {
@@ -525,6 +530,7 @@ export function createPaideiaService({
     job.syncOptions = {
       scope: options.scope ?? "full",
       components: syncComponents(options),
+      ...(options.course ? { course: options.course } : {}),
       reason: options.reason ?? ""
     };
     activeSyncJobId = job.jobId;
@@ -564,7 +570,8 @@ export function createPaideiaService({
     const job = refresh
       ? startSync({
           reason: options.forceRefresh ? "forced" : "stale",
-          components: normalizedComponents
+          components: normalizedComponents,
+          ...(options.course ? { course: options.course } : {})
         })
       : null;
     const data = await select(snapshot);
@@ -598,6 +605,7 @@ export function createPaideiaService({
           sourceId: course.sourceId ?? course.id,
           area: course.area ?? "pregrado_posgrado",
           areas: course.areas ?? [course.area ?? "pregrado_posgrado"],
+          timelineClassifications: course.timelineClassifications ?? [],
           sectionCount: (course.sections ?? []).length,
           activityCount: snapshot.activities.filter((item) => item.courseId === course.id).length
         }));

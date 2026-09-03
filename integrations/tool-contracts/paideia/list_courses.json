@@ -1,6 +1,6 @@
 {
   "name": "list_courses",
-  "description": "List normalized cached courses with their Pregrado/Posgrado or Educación Continua area.",
+  "description": "List normalized cached current, future, and past courses with their timeline classification and Paideia area.",
   "parameters": {
     "type": "object",
     "properties": {

@@ -32,17 +32,22 @@ export async function collectPaideiaAreaCourses(areas, loadDashboard) {
 
   for (const area of areas) {
     try {
-      const html = await loadDashboard(area);
-      if (!isPlausibleDashboardPage(html)) {
-        const error = new Error(
-          `Paideia ${area.id} dashboard was structurally implausible`
-        );
-        error.code = "scrape_failed";
-        throw error;
+      const loaded = await loadDashboard(area);
+      let parsed;
+      if (Array.isArray(loaded)) {
+        parsed = loaded;
+      } else {
+        if (!isPlausibleDashboardPage(loaded)) {
+          const error = new Error(
+            `Paideia ${area.id} dashboard was structurally implausible`
+          );
+          error.code = "scrape_failed";
+          throw error;
+        }
+        parsed = parseDashboardHtml(loaded, area.baseUrl, {
+          area: area.id
+        });
       }
-      const parsed = parseDashboardHtml(html, area.baseUrl, {
-        area: area.id
-      });
       for (const course of parsed) {
         if (seen.has(course.id)) continue;
         seen.add(course.id);

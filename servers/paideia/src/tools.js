@@ -41,6 +41,11 @@ export function createPaideiaTools(service) {
           enum: ["full", "catalog", "materials", "activities", "announcements", "grades"],
           description: "Refresh all metadata or only the component needed for the current task."
         },
+        course: {
+          type: "string",
+          minLength: 1,
+          description: "Optional course id, code, or name. Refreshes content only for that course while still updating the full current/future/past catalog."
+        },
         courseConcurrency: { type: "integer", minimum: 1, maximum: 6 },
         detailConcurrency: { type: "integer", minimum: 1, maximum: 8 },
         retryUnavailableAreas: {
@@ -60,7 +65,7 @@ export function createPaideiaTools(service) {
     },
     {
       name: "list_courses",
-      description: "List normalized cached courses with their Pregrado/Posgrado or Educación Continua area.",
+      description: "List normalized cached current, future, and past courses with their timeline classification and Paideia area.",
       inputSchema: schema({
         query: { type: "string" },
         limit: { type: "integer", minimum: 1, maximum: 100 },

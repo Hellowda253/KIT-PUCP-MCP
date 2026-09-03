@@ -38,6 +38,7 @@ function exactOrigin(value) {
 
 const SAFE_PATHS = [
   { pattern: /^\/my\/courses\.php$/, params: [] },
+  { pattern: /^\/lib\/ajax\/service\.php$/, params: ["info"] },
   { pattern: /^\/course\/view\.php$/, params: ["id"] },
   { pattern: /^\/mod\/(?:assign|quiz|resource|folder|url|forum)\/view\.php$/, params: ["id"] },
   { pattern: /^\/mod\/forum\/discuss\.php$/, params: ["d"] },
@@ -107,6 +108,13 @@ export function createPaideiaUrlPolicy({
       });
     }
     assertSafeQuery(url, registration.params);
+    if (
+      url.pathname === "/lib/ajax/service.php" &&
+      url.searchParams.get("info") !==
+        "core_course_get_enrolled_courses_by_timeline_classification"
+    ) {
+      throw policyError("Paideia AJAX method is not an allowlisted read operation");
+    }
     return url;
   }
 

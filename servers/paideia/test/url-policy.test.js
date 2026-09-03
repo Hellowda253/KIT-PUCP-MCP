@@ -12,6 +12,7 @@ const policy = createPaideiaUrlPolicy({
 test("URL policy allows only safe Paideia read endpoints", () => {
   for (const url of [
     "https://paideia.example.edu/my/courses.php",
+    "https://paideia.example.edu/lib/ajax/service.php?info=core_course_get_enrolled_courses_by_timeline_classification",
     "https://paideia.example.edu/course/view.php?id=1",
     "https://paideia.example.edu/mod/assign/view.php?id=2",
     "https://paideia.example.edu/mod/quiz/view.php?id=3",
@@ -42,6 +43,8 @@ test("URL policy rejects attempts, write actions, local addresses, foreign origi
     "https://paideia.example.edu/mod/quiz/startattempt.php?cmid=1",
     "https://paideia.example.edu/mod/assign/view.php?id=2&action=editsubmission",
     "https://paideia.example.edu/mod/quiz/view.php?id=3&action=startattempt",
+    "https://paideia.example.edu/lib/ajax/service.php?info=core_course_get_enrolled_courses_by_timeline_classification&action=delete",
+    "https://paideia.example.edu/lib/ajax/service.php?info=core_course_submit_user_feedback",
     "https://localhost/course/view.php?id=1",
     "https://127.0.0.1/course/view.php?id=1",
     "https://evil.example/course/view.php?id=1",

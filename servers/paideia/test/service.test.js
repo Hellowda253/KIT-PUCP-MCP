@@ -148,6 +148,24 @@ test("force refresh selects only the Paideia components needed by each query", a
   ]);
 });
 
+test("course queries pass their course selector to focused background refreshes", async () => {
+  const calls = [];
+  const { service } = await setup({
+    adapter: {
+      async sync(input) {
+        calls.push(input);
+        return { ...snapshot, generatedAt: now, retrievedAt: now };
+      }
+    }
+  });
+
+  await service.getCourseOutline({ course: "1", forceRefresh: true });
+  await service.waitForIdle();
+
+  assert.equal(calls[0].course, "1");
+  assert.deepEqual(calls[0].components, ["catalog", "course_content"]);
+});
+
 test("component refresh preserves unrelated Paideia cache slices", async () => {
   const refreshedMaterial = {
     ...snapshot.materials[0],

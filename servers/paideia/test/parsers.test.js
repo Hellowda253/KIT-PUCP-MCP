@@ -9,6 +9,7 @@ import {
   parseAnnouncementsHtml,
   parseCourseHtml,
   parseDashboardHtml,
+  parseTimelineCourseCatalog,
   parseGradesHtml,
   isPlausibleCoursePage,
   isPlausibleDashboardPage
@@ -42,6 +43,51 @@ test("dashboard parser normalizes and deduplicates visible courses", async () =>
     true
   );
   assert.equal(isPlausibleDashboardPage("<form id=login></form>"), false);
+});
+
+test("timeline catalog parser includes past courses and merges classifications by course id", () => {
+  const courses = parseTimelineCourseCatalog([
+    {
+      classification: "inprogress",
+      courses: [{
+        id: 101,
+        fullname: "2026-2 Simulación (IND123)",
+        viewurl: `${baseUrl}/course/view.php?id=101`
+      }]
+    },
+    {
+      classification: "past",
+      courses: [
+        {
+          id: 303,
+          fullname: "2023-1 Fundamentos de Cálculo (1MAT05)",
+          viewurl: `${baseUrl}/course/view.php?id=303`
+        },
+        {
+          id: 101,
+          fullname: "2026-2 Simulación (IND123)",
+          viewurl: `${baseUrl}/course/view.php?id=101`
+        }
+      ]
+    }
+  ], baseUrl, { area: "pregrado_posgrado" });
+
+  assert.deepEqual(courses.map(({ id, shortName, timelineClassifications }) => ({
+    id,
+    shortName,
+    timelineClassifications
+  })), [
+    {
+      id: "303",
+      shortName: "Fundamentos de Cálculo",
+      timelineClassifications: ["past"]
+    },
+    {
+      id: "101",
+      shortName: "Simulación",
+      timelineClassifications: ["inprogress", "past"]
+    }
+  ]);
 });
 
 test("dashboard parser marks areas and namespaces Educación Continua identifiers", async () => {

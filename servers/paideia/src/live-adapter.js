@@ -24,7 +24,9 @@ import {
   parseActivityDetailHtml,
   parseAnnouncementsHtml,
   parseCourseHtml,
+  parseDashboardHtml,
   parseGradesHtml,
+  parseTimelineCourseCatalog,
   isPlausibleCoursePage
 } from "./parsers.js";
 import { searchableText } from "./text.js";
@@ -110,6 +112,76 @@ export function createLivePaideiaAdapter({
   continuingCooldownMs = 30 * 60 * 1000
 } = {}) {
   const areaCooldowns = new Map();
+
+  async function loadTimelineCatalog(page, area, policy) {
+    const method = "core_course_get_enrolled_courses_by_timeline_classification";
+    policy.assertNavigation(`${area.baseUrl}/lib/ajax/service.php?info=${method}`);
+    try {
+      const batches = await page.evaluate(async ({ baseUrl, classifications, methodName }) => {
+        const sesskey = globalThis.M?.cfg?.sesskey ||
+          document.querySelector('input[name="sesskey"]')?.value || "";
+        if (!sesskey) throw new Error("timeline_sesskey_unavailable");
+        const endpoint = `${baseUrl}/lib/ajax/service.php?sesskey=${encodeURIComponent(sesskey)}&info=${encodeURIComponent(methodName)}`;
+        const output = [];
+        for (const classification of classifications) {
+          let offset = 0;
+          const courses = [];
+          for (let pageNumber = 0; pageNumber < 50; pageNumber += 1) {
+            const response = await fetch(endpoint, {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify([{
+                index: 0,
+                methodname: methodName,
+                args: {
+                  offset,
+                  limit: 0,
+                  classification,
+                  sort: "fullname",
+                  customfieldname: "",
+                  customfieldvalue: ""
+                }
+              }])
+            });
+            if (!response.ok) throw new Error(`timeline_http_${response.status}`);
+            const payload = await response.json();
+            const entry = Array.isArray(payload) ? payload[0] : payload;
+            if (entry?.error) throw new Error("timeline_service_error");
+            const pageCourses = Array.isArray(entry?.data?.courses)
+              ? entry.data.courses
+              : [];
+            courses.push(...pageCourses);
+            const nextOffset = Number(entry?.data?.nextoffset);
+            if (!Number.isFinite(nextOffset) || nextOffset < 0 || nextOffset <= offset) break;
+            offset = nextOffset;
+          }
+          output.push({ classification, courses });
+        }
+        return output;
+      }, {
+        baseUrl: area.baseUrl,
+        classifications: ["inprogress", "future", "past"],
+        methodName: method
+      });
+      if (!Array.isArray(batches)) throw new Error("timeline_response_invalid");
+      return parseTimelineCourseCatalog(batches, area.baseUrl, { area: area.id });
+    } catch {
+      return parseDashboardHtml(await page.content(), area.baseUrl, { area: area.id });
+    }
+  }
+
+  function matchesCourseSelector(course, selector) {
+    if (!selector) return true;
+    const needle = searchableText(selector);
+    return [course.id, course.sourceId, course.name, course.shortName]
+      .some((value) => searchableText(value).includes(needle));
+  }
+
+  function defaultContentCourse(course) {
+    const classifications = course.timelineClassifications ?? [];
+    return classifications.length === 0 || classifications.includes("inprogress");
+  }
   async function withSession(task, { acceptDownloads = false } = {}) {
     const config = await configLoader();
     if (!config.user || !config.pass) {
@@ -307,13 +379,12 @@ export function createLivePaideiaAdapter({
           timings[`${name}Ms`] = Date.now() - started;
         }
       };
-      const primaryDashboardHtml = await page.content();
       const areas = paideiaAreaDefinitions(config);
       const collected = await stage("catalog", () =>
         collectPaideiaAreaCourses(
           areas,
           async (area) => {
-            if (area.required) return primaryDashboardHtml;
+            if (area.required) return loadTimelineCatalog(page, area, policy);
             const cooldownUntil = areaCooldowns.get(area.id) ?? 0;
             if (
               options.retryUnavailableAreas !== true &&
@@ -333,7 +404,7 @@ export function createLivePaideiaAdapter({
                 policy
               );
               areaCooldowns.delete(area.id);
-              return await areaPage.content();
+              return loadTimelineCatalog(areaPage, area, policy);
             } catch (error) {
               areaCooldowns.set(area.id, epochNow() + continuingCooldownMs);
               throw error;
@@ -358,9 +429,14 @@ export function createLivePaideiaAdapter({
         Math.max(Number(options.courseConcurrency || 4), 1),
         6
       );
+      const contentCourses = courses.filter((course) =>
+        options.course
+          ? matchesCourseSelector(course, options.course)
+          : defaultContentCourse(course)
+      );
       const courseResults = requested.has("course_content")
         ? await stage("courseContent", () => mapLimit(
-            courses,
+            contentCourses,
             courseConcurrency,
             async (course) => {
               const coursePage = await context.newPage();
@@ -394,7 +470,7 @@ export function createLivePaideiaAdapter({
               }
             }
           ))
-        : courses.map((course) => ({ course, parsed: null, failed: false }));
+        : [];
 
       const parsedCourses = courseResults.map(({ parsed }) => parsed ?? {
         sections: [],
@@ -408,10 +484,17 @@ export function createLivePaideiaAdapter({
       const activities = parsedCourses.flatMap((course) => course.activities);
       const pendingItems = parsedCourses.flatMap((course) => course.pendingItems);
       const materials = parsedCourses.flatMap((course) => course.materials);
-      const normalizedCourses = courses.map((course, index) => ({
+      const parsedByCourseId = new Map(
+        courseResults.map(({ course }, index) => [course.id, parsedCourses[index]])
+      );
+      const normalizedCourses = courses.map((course) => ({
         ...course,
-        sections: parsedCourses[index].sections
+        sections: parsedByCourseId.get(course.id)?.sections ?? []
       }));
+      const contentCourseIds = new Set(contentCourses.map(({ id }) => id));
+      const normalizedContentCourses = normalizedCourses.filter(({ id }) =>
+        contentCourseIds.has(id)
+      );
       const activityDetails = {};
       if (requested.has("activity_details")) {
         await stage("activityDetails", () => mapLimit(
@@ -452,7 +535,7 @@ export function createLivePaideiaAdapter({
       const grades = {};
       if (requested.has("announcements")) {
         await stage("announcements", () => mapLimit(
-          normalizedCourses,
+          normalizedContentCourses,
           Math.min(courseConcurrency, 4),
           async (course) => {
             const courseActivities = activities.filter((item) => item.courseId === course.id);
@@ -495,7 +578,7 @@ export function createLivePaideiaAdapter({
       }
       if (requested.has("grades")) {
         await stage("grades", () => mapLimit(
-          normalizedCourses,
+          normalizedContentCourses,
           Math.min(courseConcurrency, 4),
           async (course) => {
             const gradePage = await context.newPage();
@@ -534,7 +617,12 @@ export function createLivePaideiaAdapter({
         grades,
         failedCourseIds,
         areaStates,
-        coverage: { components, allCourses: true },
+        coverage: {
+          components,
+          allCourses: !components.some((component) => component !== "catalog") ||
+            contentCourses.length === courses.length,
+          courseIds: contentCourses.map(({ id }) => id)
+        },
         timings,
         failures
       };

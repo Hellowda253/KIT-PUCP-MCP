@@ -15,6 +15,11 @@
         ],
         "description": "Refresh all metadata or only the component needed for the current task."
       },
+      "course": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Optional course id, code, or name. Refreshes content only for that course while still updating the full current/future/past catalog."
+      },
       "courseConcurrency": {
         "type": "integer",
         "minimum": 1,

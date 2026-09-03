@@ -103,6 +103,44 @@ export function parseDashboardHtml(html, baseUrl, { area } = {}) {
   );
 }
 
+export function parseTimelineCourseCatalog(batches, baseUrl, { area } = {}) {
+  const found = new Map();
+  for (const batch of Array.isArray(batches) ? batches : []) {
+    const classification = String(batch?.classification || "").trim();
+    for (const raw of Array.isArray(batch?.courses) ? batch.courses : []) {
+      const fallbackId = String(raw?.id ?? "").trim();
+      const url = absoluteUrl(
+        raw?.viewurl || raw?.courseviewurl || (fallbackId ? `/course/view.php?id=${fallbackId}` : ""),
+        baseUrl
+      );
+      const sourceId = String(raw?.id ?? idFromUrl(url)).trim();
+      const name = cleanText(raw?.fullname || raw?.displayname || raw?.shortname || "");
+      if (!sourceId || !name || !url) continue;
+      const previous = found.get(sourceId);
+      const timelineClassifications = [
+        ...(previous?.timelineClassifications ?? []),
+        ...(classification ? [classification] : [])
+      ].filter((value, index, values) => values.indexOf(value) === index);
+      const course = {
+        id: scopedEntityId(sourceId, area),
+        name,
+        shortName: normalizeCourseName(name),
+        url,
+        timelineClassifications
+      };
+      if (area) {
+        course.sourceId = sourceId;
+        course.area = area;
+        course.areas = [area];
+      }
+      found.set(sourceId, previous ? { ...previous, ...course } : course);
+    }
+  }
+  return [...found.values()].sort((left, right) =>
+    left.shortName.localeCompare(right.shortName, "es", { sensitivity: "base" })
+  );
+}
+
 export function isPlausibleDashboardPage(html) {
   const source = String(html);
   if (
