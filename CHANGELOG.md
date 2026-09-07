@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-09-06
+
 - Agrupa clase, práctica, laboratorio y examen como una sola opción antes de recomendar o validar horarios; los componentes incompletos ya no pueden aparecer como una combinación válida.
 - Degrada limpiamente las consultas de inscripción cuando la ventana de matrícula está cerrada y conserva como respaldo el horario matriculado y el catálogo vigente.
 - Unifica la resolución de cursos de Paideia por ID, clave y nombre, permite recuperar detalles de actividades bajo demanda y deja de exponer rutas locales en el estado.
@@ -10,6 +12,7 @@
 - Convierte la ausencia del calendario académico en una acción de inicialización explícita para el agente, con evidencia oficial y persistencia JSON local.
 - Permite calendarios verificados que cubren un programa completo mediante `courseKeys: ["*"]`.
 - Bloquea cálculos superiores a la semana 19 hasta verificar el ciclo activo y actualizar el registro.
+- Amplía a 700 palabras el umbral de compactación de la skill enrutadora `pucp-academic`.
 
 ## 0.3.0 - 2026-08-31
 

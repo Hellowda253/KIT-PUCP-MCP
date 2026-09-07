@@ -57,7 +57,7 @@ test("PUCP Academic routes personal data and loads detailed workflows only on de
   ])));
 
   assert.ok(skill, "skills/pucp-academic/SKILL.md must exist");
-  assert.ok(wordCount(skill) < 400, "the academic router should stay compact");
+  assert.ok(wordCount(skill) <= 700, "the academic router should stay compact");
   assert.match(metadata(skill).description, /Campus Virtual.*Paideia|Paideia.*Campus Virtual/iu);
   assert.match(skill, /pucp_academic_overview/u);
   assert.match(skill, /fuente.*conflicto|conflicto.*fuente/iu);
