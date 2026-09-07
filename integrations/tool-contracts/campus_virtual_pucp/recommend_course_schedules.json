@@ -1,6 +1,6 @@
 {
   "name": "recommend_course_schedules",
-  "description": "Generate and rank active-term non-conflicting schedules from the best currently available Campus source; never enrolls or controls the Campus generator.",
+  "description": "Generate and rank active-term schedules after grouping every class, practice, laboratory, and exam belonging to each selected schedule. Incomplete component evidence is rejected rather than reported as conflict-free; never enrolls or controls the Campus generator.",
   "parameters": {
     "type": "object",
     "properties": {

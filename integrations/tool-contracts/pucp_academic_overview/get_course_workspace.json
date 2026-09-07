@@ -1,6 +1,6 @@
 {
   "name": "get_course_workspace",
-  "description": "Return one course workspace combining Paideia materials and pending work with Campus schedule and official grades. For an assignment or TA, practical, lab, or exam topic, use authorized email > explicit Paideia instructions > current syllabus > materials. Stop on a clear instruction and label the result confirmed, scheduled, or inferred. An ordinary class uses the fast academic-week flow. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. calendar_unavailable requires verifying and recording a program calendar, not assuming week 1.",
+  "description": "Return one course workspace combining Paideia materials and pending work with Campus schedule and official grades. For an assignment or TA, practical, lab, or exam topic, use authorized email > explicit Paideia instructions > current syllabus > materials. Stop on a clear instruction and label the result confirmed, scheduled, or inferred. An ordinary class uses the fast academic-week flow. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true on first use or after week 19, inspect the official PUCP page, call set_academic_calendar, and retry before making a week-dependent claim.",
   "parameters": {
     "type": "object",
     "properties": {

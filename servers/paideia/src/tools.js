@@ -95,7 +95,7 @@ export function createPaideiaTools(service) {
     },
     {
       name: "get_activity_details",
-      description: "Return cached safe overview details for an assignment or quiz as explicit Paideia evidence; never opens an attempt.",
+      description: "Return or fetch on demand the safe overview details for a known assignment or quiz as explicit Paideia evidence; never opens an attempt or submission editor.",
       inputSchema: schema({
         activity: { type: "string", minLength: 1 },
         ...refreshProperties

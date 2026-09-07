@@ -13,6 +13,8 @@ Resuelve consultas académicas personales con los tres servidores del kit. Carga
 - Para saber de qué trata la próxima clase o qué estudiar esta semana, aplica «Semana del ciclo y avance del curso» en [Campus Virtual](references/campus-virtual.md) antes de elegir materiales.
 - Para matrícula, cursos permitidos, vacantes, búsqueda, comparación o cambios de inscripción, lee [matrícula y horarios](references/matricula-y-horarios.md).
 - Para crear un horario visual, lee [horario HTML](references/horario-html.md) y usa el renderizador incluido. No escribas un HTML propio desde cero.
+- Si el usuario pide ver mejor un horario, una vista más clara o cómoda, un formato visual, imprimible o para guardar como PDF, sigue directamente ese flujo con los datos completos y verificados. No vuelvas a pedir confirmación ni sustituyas el renderizador por HTML escrito a mano.
+- Después de entregar un horario en texto o tabla, ofrece una vez: «¿Quieres que lo convierta en un horario visual, listo para imprimir o guardar como PDF?». No repitas la oferta en la misma conversación si ya la hiciste, el usuario la rechazó o ya entregaste el horario visual. La oferta por sí sola no autoriza a generar el archivo.
 
 ## Evidencia y vigencia
 
@@ -22,8 +24,10 @@ Paideia prevalece para entregas, anuncios y materiales actuales. Campus prevalec
 
 ## Límites
 
-Las consultas son de solo lectura salvo el flujo de inscripción descrito en su referencia. Descarga archivos únicamente a petición y no sobrescribas sin confirmación. Nunca abras intentos de evaluación ni envíes tareas, mensajes, pagos, solicitudes, matrícula definitiva u otros formularios.
+Las consultas son de solo lectura salvo el flujo de inscripción descrito en su referencia. Una consulta sobre el contenido de un documento autoriza recuperar el archivo estrictamente necesario para responder, sin pedir una confirmación adicional. No sobrescribas archivos existentes sin confirmación. Nunca abras intentos de evaluación ni envíes tareas, mensajes, pagos, solicitudes, matrícula definitiva u otros formularios.
 
 La biblioteca de materiales es opcional. Ofrécela durante la instalación o cuando el usuario pida organizar sus descargas, permite reutilizar una carpeta existente y no la vuelvas a proponer si ya fue configurada o rechazada.
+
+Cuando una descarga sea grande o varias descargas empiecen a acumularse, recuerda ocasionalmente la ubicación de los materiales y el espacio total aproximado que ocupan. No repitas este aviso después de cada archivo pequeño.
 
 Para reglamentos, servicios, convocatorias o procedimientos públicos usa `pucp-context`. Para enseñar, resolver ejercicios o mejorar el rendimiento usa `profe-pucp`.

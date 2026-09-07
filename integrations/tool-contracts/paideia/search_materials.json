@@ -1,6 +1,6 @@
 {
   "name": "search_materials",
-  "description": "Search cached material metadata; does not download or open files. For a TA, practical, lab, or exam topic, materials are last-resort evidence rather than confirmed instructions. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. calendar_unavailable requires verifying and recording a program calendar, not assuming week 1.",
+  "description": "Search cached material metadata; does not download or open files. For a TA, practical, lab, or exam topic, materials are last-resort evidence rather than confirmed instructions. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true on first use or after week 19, inspect the official PUCP page, call set_academic_calendar, and retry before making a week-dependent claim.",
   "parameters": {
     "type": "object",
     "properties": {

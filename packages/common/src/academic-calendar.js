@@ -5,6 +5,8 @@ import { McpToolError } from "./errors.js";
 import { readJsonCache, writeJsonAtomic } from "./json-cache.js";
 
 const TIME_ZONE = "America/Lima";
+const MAX_REGULAR_WEEK = 19;
+const OFFICIAL_CALENDAR_HINT = "https://estudiante.pucp.edu.pe/calendario-academico/";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const daySchema = { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" };
 const textSchema = { type: "string", minLength: 1, maxLength: 200 };
@@ -82,12 +84,36 @@ function liveDate(instant) {
 
 function weekAt(record, date) {
   if (date < record.startDate) return { state: "before_classes", week: null };
+  const elapsedWeek = 1 + Math.floor((Date.parse(date) - Date.parse(record.startDate)) / (7 * 86400000));
+  if (elapsedWeek > MAX_REGULAR_WEEK) return {
+    state: "calendar_verification_required", week: null,
+    calculatedWeek: elapsedWeek, reason: "week_exceeds_19"
+  };
   if (date > record.endDate) return { state: "after_classes", week: null };
   if (record.weeks) {
     const match = record.weeks.find((week) => week.start <= date && week.end >= date);
-    return { state: match ? "available" : "week_not_defined", week: match?.number ?? null };
+    if (!match) return { state: "week_not_defined", week: null };
+    if (match.number > MAX_REGULAR_WEEK) return {
+      state: "calendar_verification_required", week: null,
+      calculatedWeek: match.number, reason: "week_exceeds_19"
+    };
+    return { state: "available", week: match.number, calculatedWeek: match.number };
   }
-  return { state: "available", week: 1 + Math.floor((Date.parse(date) - Date.parse(record.startDate)) / (7 * 86400000)) };
+  return { state: "available", week: elapsedWeek, calculatedWeek: elapsedWeek };
+}
+
+function registrationAction(reason) {
+  const stale = reason === "week_exceeds_19";
+  return {
+    required: true,
+    reason,
+    action: stale ? "verify_active_term_and_update_calendar" : "register_verified_calendar",
+    tool: "set_academic_calendar",
+    officialSourceHint: OFFICIAL_CALENDAR_HINT,
+    instruction: stale
+      ? "Verify the active term and its official PUCP class dates now, then replace or add the matching local calendar before using an academic week."
+      : "On first use, inspect the official PUCP calendar page for the applicable term/program and call set_academic_calendar before answering a week-dependent question."
+  };
 }
 
 function contextFor(records, options, instant) {
@@ -97,25 +123,42 @@ function contextFor(records, options, instant) {
     currentWeek: null, referenceWeek: null, state: "calendar_unavailable",
     guidance: "Use a verified calendar and explicit week labels; never infer the current section from display order. A matching week is not proof of actual teaching progress." };
   const keys = [options.course, ...(options.courseKeys ?? [])].filter(Boolean).map(normalize);
-  if (!keys.length && !options.calendarId && !options.program) return { ...base, state: "scope_required" };
+  if (!keys.length && !options.calendarId && !options.program) return {
+    ...base,
+    state: "scope_required",
+    ...(records.length ? {} : { calendarRegistration: registrationAction("missing_verified_calendar") })
+  };
   let matches = records.filter((record) =>
     (!options.calendarId || record.id === options.calendarId) &&
     (!options.term || normalize(record.term) === normalize(options.term)) &&
-    (!options.program || normalize(record.program) === normalize(options.program)) &&
-    (!keys.length || record.courseKeys.some((key) => keys.includes(normalize(key))))
+    (!options.program || normalize(record.program) === normalize(options.program))
   );
+  if (keys.length) {
+    const direct = matches.filter((record) => record.courseKeys.some((key) => keys.includes(normalize(key))));
+    matches = direct.length ? direct : matches.filter((record) => record.courseKeys.includes("*"));
+  }
   const inRange = matches.filter((record) => record.startDate <= referenceDate && record.endDate >= referenceDate);
   if (inRange.length) matches = inRange;
-  if (matches.length !== 1) return { ...base, state: matches.length ? "calendar_ambiguous" : "calendar_unavailable" };
+  if (matches.length !== 1) return {
+    ...base,
+    state: matches.length ? "calendar_ambiguous" : "calendar_unavailable",
+    ...(matches.length ? {} : { calendarRegistration: registrationAction("missing_verified_calendar") })
+  };
   const record = matches[0];
   const current = weekAt(record, currentDate), target = weekAt(record, referenceDate);
-  return { ...base, state: target.state, currentState: current.state,
+  const verificationRequired = current.state === "calendar_verification_required" ||
+    target.state === "calendar_verification_required";
+  return { ...base, state: verificationRequired ? "calendar_verification_required" : target.state,
+    currentState: current.state,
     calendarId: record.id, term: record.term, program: record.program, kind: record.kind,
     startDate: record.startDate, endDate: record.endDate,
     currentWeek: current.week, referenceWeek: target.week,
+    calculatedCurrentWeek: current.calculatedWeek ?? current.week,
+    calculatedReferenceWeek: target.calculatedWeek ?? target.week,
     weekBasis: record.weeks ? "published_intervals" : "calculated_from_start",
     source: record.source,
-    calendarAgeSeconds: Math.max(0, Math.floor((Date.parse(instant) - Date.parse(record.source.recordedAt)) / 1000))
+    calendarAgeSeconds: Math.max(0, Math.floor((Date.parse(instant) - Date.parse(record.source.recordedAt)) / 1000)),
+    ...(verificationRequired ? { calendarRegistration: registrationAction("week_exceeds_19") } : {})
   };
 }
 
@@ -196,7 +239,7 @@ export function withAcademicContext(tools, store) {
       properties: { ...tool.inputSchema.properties, referenceDate: { ...daySchema,
         description: "Optional target class date for material matching; does not replace the current server date." } }
     } } : {}),
-    description: `${tool.description ?? ""} Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. calendar_unavailable requires verifying and recording a program calendar, not assuming week 1.`,
+    description: `${tool.description ?? ""} Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true on first use or after week 19, inspect the official PUCP page, call set_academic_calendar, and retry before making a week-dependent claim.`,
     handler: async (args = {}) => {
       const { referenceDate, ...queryArgs } = args;
       if (referenceDate) validDate(referenceDate);
@@ -232,6 +275,39 @@ export function withAcademicContext(tools, store) {
             sectionMatchesReferenceWeek: sectionMatches(item.section, timing.referenceWeek) };
         }));
       }
+      if (context.state === "scope_required") {
+        const timings = ["items", "materials", "schedule", "upcoming"]
+          .flatMap(field => Array.isArray(data[field]) ? data[field] : [])
+          .map(item => item.academicTiming)
+          .filter(timing => timing?.state === "available" && timing.calendarId);
+        const grouped = new Map();
+        for (const timing of timings) {
+          if (!grouped.has(timing.calendarId)) grouped.set(timing.calendarId, []);
+          grouped.get(timing.calendarId).push(timing);
+        }
+        if (grouped.size === 1) {
+          const [calendarId, values] = [...grouped.entries()][0];
+          data.academicContext = {
+            ...context,
+            state: "available",
+            calendarId,
+            currentWeek: values.find(value => Number.isInteger(value.currentWeek))?.currentWeek ?? null,
+            referenceWeek: null,
+            referenceWeeks: [...new Set(values.map(value => value.referenceWeek).filter(Number.isInteger))].sort((a, b) => a - b),
+            weekBasis: "aggregate_items"
+          };
+        } else if (grouped.size > 1) {
+          data.academicContext = {
+            ...context,
+            state: "mixed_calendars",
+            contexts: [...grouped.entries()].map(([calendarId, values]) => ({
+              calendarId,
+              currentWeek: values.find(value => Number.isInteger(value.currentWeek))?.currentWeek ?? null,
+              referenceWeeks: [...new Set(values.map(value => value.referenceWeek).filter(Number.isInteger))].sort((a, b) => a - b)
+            }))
+          };
+        }
+      }
       return { ...result, data };
     }
   });
@@ -240,7 +316,7 @@ export function withAcademicContext(tools, store) {
 export function createAcademicCalendarTools(store) {
   return [{
     name: "get_academic_calendar",
-    description: "Read locally registered program/term calendars and compute weeks from the current server clock in America/Lima. Optional date computes a separate reference week. No Campus session or terminal required. Missing calendars must be verified at an official source before registration.",
+    description: "Read locally registered program/term calendars and compute weeks from the current server clock in America/Lima. On first use, calendarRegistration.required instructs the agent to inspect the official PUCP calendar page and call set_academic_calendar before answering a week-dependent question. A computed week above 19 requires verifying the active term and updating the record.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       calendarId: textSchema, course: textSchema, term: textSchema, program: textSchema, date: daySchema
     } },
@@ -248,7 +324,7 @@ export function createAcademicCalendarTools(store) {
     handler: (args) => store.list(args)
   }, {
     name: "set_academic_calendar",
-    description: "Register or replace one LOCAL program calendar after inspecting its official public PUCP source. Include class start/end, applicable term/program, explicit course ids/codes/names and a short non-personal evidence excerpt. Use separate summer/intensive calendars and published week intervals when available. Does not alter Campus. Verification is caller-reported, not independently checked by the server.",
+    description: "Register or replace one LOCAL JSON program calendar after inspecting its official public PUCP page or PDF. Include class start/end, applicable term/program and a short non-personal evidence excerpt. Use courseKeys [\"*\"] only when the source applies to every course in that program; otherwise list explicit identifiers. Use separate summer/intensive calendars and published week intervals when available. Does not alter Campus.",
     inputSchema: { type: "object", additionalProperties: false, required: ["calendar"], properties: { calendar: calendarSchema } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     handler: (args) => store.save(args)

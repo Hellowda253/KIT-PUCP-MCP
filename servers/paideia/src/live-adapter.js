@@ -5,6 +5,7 @@ import path from "node:path";
 
 import {
   readJsonCache,
+  resolveCourse,
   writeJsonAtomic
 } from "@pucp-academic-mcp/common";
 
@@ -169,13 +170,6 @@ export function createLivePaideiaAdapter({
     } catch {
       return parseDashboardHtml(await page.content(), area.baseUrl, { area: area.id });
     }
-  }
-
-  function matchesCourseSelector(course, selector) {
-    if (!selector) return true;
-    const needle = searchableText(selector);
-    return [course.id, course.sourceId, course.name, course.shortName]
-      .some((value) => searchableText(value).includes(needle));
   }
 
   function defaultContentCourse(course) {
@@ -429,11 +423,10 @@ export function createLivePaideiaAdapter({
         Math.max(Number(options.courseConcurrency || 4), 1),
         6
       );
-      const contentCourses = courses.filter((course) =>
-        options.course
-          ? matchesCourseSelector(course, options.course)
-          : defaultContentCourse(course)
-      );
+      const selectedContentCourse = options.course ? resolveCourse(courses, options.course) : null;
+      const contentCourses = courses.filter((course) => selectedContentCourse
+        ? course.id === selectedContentCourse.id
+        : defaultContentCourse(course));
       const courseResults = requested.has("course_content")
         ? await stage("courseContent", () => mapLimit(
             contentCourses,
@@ -498,7 +491,9 @@ export function createLivePaideiaAdapter({
       const activityDetails = {};
       if (requested.has("activity_details")) {
         await stage("activityDetails", () => mapLimit(
-          pendingItems,
+          options.activity
+            ? activities.filter(({ id, url }) => [id, url].includes(options.activity))
+            : pendingItems,
           Math.min(Math.max(Number(options.detailConcurrency || 5), 1), 8),
           async (activity) => {
             const detailPage = await context.newPage();
@@ -1029,5 +1024,16 @@ export function createLivePaideiaAdapter({
     );
   }
 
-  return { sync, getFolderContents, downloadResource, downloadCourseMaterials };
+  async function getActivityDetails(activity) {
+    return withSession(async ({ context, policy }) => {
+      const page = await context.newPage();
+      try {
+        await safeGoto(page, activity.url, policy, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        return parseActivityDetailHtml(await page.content(), activity);
+      } finally {
+        await page.close().catch(() => {});
+      }
+    });
+  }
+  return { sync, getActivityDetails, getFolderContents, downloadResource, downloadCourseMaterials };
 }

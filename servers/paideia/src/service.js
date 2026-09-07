@@ -6,6 +6,7 @@ import {
   TTL_SECONDS,
   createEnvelope,
   readJsonCache,
+  resolveCourse,
   resolveAllowedPath,
   shouldRefresh,
   writeJsonAtomic
@@ -63,6 +64,10 @@ function matches(value, query) {
   return !query || searchableText(value).includes(searchableText(query));
 }
 
+function belongsToCourse(snapshot, item, query) {
+  return !query || String(item.courseId) === String(resolveCourse(snapshot.courses, query).id);
+}
+
 function syncComponents(options = {}) {
   const requested = Array.isArray(options.components)
     ? options.components
@@ -84,6 +89,7 @@ function safeJobError(error) {
   }
   const knownCode = [
       "area_cooldown",
+      "activity_detail_unavailable",
       "authentication_required",
       "download_failed",
       "download_limit_reached",
@@ -101,6 +107,7 @@ function safeJobError(error) {
   const publicCode = knownCode ? normalizedCode : "operation_failed";
   const messages = {
     area_cooldown: "An optional Paideia area is temporarily in cooldown",
+    activity_detail_unavailable: "Paideia did not publish safe overview details for this activity",
     authentication_required: "Paideia authentication is required",
     download_failed: "The Paideia download failed",
     download_limit_reached: "The Paideia download concurrency limit was reached",
@@ -207,13 +214,20 @@ function mergeSyncSnapshot(previous, current) {
   const refreshedComponents = coverage?.components ?? SYNC_COMPONENTS;
   const componentGeneratedAt = {
     ...previousComponentGeneratedAt,
-    ...Object.fromEntries(refreshedComponents.map((component) => [component, generatedAt]))
+    ...Object.fromEntries(refreshedComponents.filter(c => !coverage || coverage.allCourses || c === 'catalog').map((component) => [component, generatedAt]))
   };
+  const courseComponentGeneratedAt = structuredClone(previous?.courseComponentGeneratedAt ?? {});
+  for (const id of coverage?.courseIds ?? (current.courses ?? []).map(c => c.id)) {
+    if ((current.failedCourseIds ?? []).includes(id)) continue;
+    courseComponentGeneratedAt[id] = { ...(courseComponentGeneratedAt[id] ?? {}),
+      ...Object.fromEntries(refreshedComponents.map(c => [c, generatedAt])) };
+  }
   if (!previous) {
     const { coverage: _coverage, failedCourseIds: _failedCourseIds, ...cleanCurrent } = current;
     return {
       ...cleanCurrent,
       componentGeneratedAt,
+      courseComponentGeneratedAt,
       lastSyncCoverage: coverage ?? { components: SYNC_COMPONENTS, allCourses: true }
     };
   }
@@ -240,6 +254,7 @@ function mergeSyncSnapshot(previous, current) {
         if (
           components.has("course_content") &&
           refreshed &&
+          (coverage.allCourses || coverage.courseIds?.includes(course.id)) &&
           !failed.has(course.id)
         ) {
           return refreshed;
@@ -296,6 +311,7 @@ function mergeSyncSnapshot(previous, current) {
       ),
       areaStates,
       componentGeneratedAt,
+      courseComponentGeneratedAt,
       lastSyncCoverage: coverage
     };
   }
@@ -330,11 +346,13 @@ function mergeSyncSnapshot(previous, current) {
     ),
     grades: mergeUnavailableMap(previous.grades, current.grades, failed),
     componentGeneratedAt,
+    courseComponentGeneratedAt,
     lastSyncCoverage: { components: SYNC_COMPONENTS, allCourses: true }
   };
 }
 
 function findOne(items, query, fields, kind) {
+  if (kind === 'course') return resolveCourse(items, query);
   const raw = String(query ?? "").trim();
   const exact = items.filter((item) =>
     fields.some((field) => String(item[field] ?? "") === raw)
@@ -560,7 +578,9 @@ export function createPaideiaService({
     const snapshot = await readSnapshot();
     const normalizedComponents = syncComponents({ components });
     const freshnessComponent = normalizedComponents.find((component) => component !== "catalog") ?? "catalog";
-    const generatedAt = snapshot.componentGeneratedAt?.[freshnessComponent] ?? snapshot.generatedAt;
+    const courseId = options.course ? resolveCourse(snapshot.courses, options.course).id : null;
+    const generatedAt = (courseId ? snapshot.courseComponentGeneratedAt?.[courseId]?.[freshnessComponent] : null)
+      ?? snapshot.componentGeneratedAt?.[freshnessComponent] ?? snapshot.generatedAt;
     const refresh = shouldRefresh({
       forceRefresh: Boolean(options.forceRefresh),
       generatedAt,
@@ -571,7 +591,7 @@ export function createPaideiaService({
       ? startSync({
           reason: options.forceRefresh ? "forced" : "stale",
           components: normalizedComponents,
-          ...(options.course ? { course: options.course } : {})
+          ...(courseId ? { course: courseId } : {})
         })
       : null;
     const data = await select(snapshot);
@@ -653,7 +673,7 @@ export function createPaideiaService({
     return query(options, async (snapshot) => {
       const items = sortText(
         snapshot.activities
-          .filter((item) => matches(`${item.courseId} ${item.course}`, options.course))
+          .filter((item) => belongsToCourse(snapshot, item, options.course))
           .filter((item) => matches(item.section, options.section))
           .filter((item) => !options.type || item.type === options.type)
           .filter((item) => matches(`${item.title} ${item.type}`, options.query)),
@@ -664,28 +684,37 @@ export function createPaideiaService({
   }
 
   async function getActivityDetails(options) {
-    return query(options, async (snapshot) => {
-      const activity = findOne(
-        snapshot.activities,
-        options.activity,
-        ["id", "url", "title"],
-        "activity"
-      );
-      return {
-        activity,
-        detail: snapshot.activityDetails?.[activity.id] ?? {
-          state: "unavailable",
-          id: activity.id
-        }
-      };
-    }, { components: SYNC_SCOPES.activities });
+    const snapshot = await readSnapshot();
+    const activity = findOne(snapshot.activities, options.activity, ["id", "url", "title"], "activity");
+    const cached = snapshot.activityDetails?.[activity.id];
+    if (!options.forceRefresh && cached?.state !== "unavailable" && cached?.state !== "error" && cached) {
+      return envelope(snapshot, { state: "available", activity, detail: cached });
+    }
+    const activeJob = [...jobs.values()].find((candidate) =>
+      candidate.kind === "activity-detail" &&
+      candidate.dedupeKey === activity.id &&
+      ["queued", "running"].includes(candidate.status)
+    );
+    const job = activeJob ?? startJob("activity-detail", async () => {
+      const detail = typeof adapter.getActivityDetails === "function"
+        ? await adapter.getActivityDetails(activity)
+        : (await adapter.sync({ components: SYNC_SCOPES.activities, course: activity.courseId,
+            activity: activity.id, previousSnapshot: snapshot, metadataOnly: true })).activityDetails?.[activity.id];
+      if (!detail) throw new McpToolError("activity_detail_unavailable", "Paideia did not publish activity details");
+      const latest = await readSnapshot();
+      await writeJsonAtomic(cachePath, { ...latest, activityDetails: { ...(latest.activityDetails ?? {}), [activity.id]: detail } });
+      return detail;
+    }, { dedupeKey: activity.id });
+    return envelope(snapshot, { state: "pending", jobId: job.jobId, activity,
+      detail: { state: "pending", id: activity.id, jobId: job.jobId } },
+      { warnings: ["The activity overview is being fetched without opening an attempt or submission form."] });
   }
 
   async function listPendingItems(options = {}) {
     return query(options, async (snapshot) => {
       const items = sortText(
         snapshot.pendingItems
-          .filter((item) => matches(`${item.courseId} ${item.course}`, options.course))
+          .filter((item) => belongsToCourse(snapshot, item, options.course))
           .filter((item) => matches(item.section, options.section))
           .filter((item) => !options.type || item.type === options.type)
           .filter((item) => matches(item.title, options.query)),
@@ -701,7 +730,7 @@ export function createPaideiaService({
       const items = snapshot.pendingItems
         .filter((item) => Number.isFinite(item.dueTimestamp))
         .filter((item) => options.includePast || item.dueTimestamp >= current)
-        .filter((item) => matches(`${item.courseId} ${item.course}`, options.course))
+        .filter((item) => belongsToCourse(snapshot, item, options.course))
         .sort((left, right) =>
           left.dueTimestamp - right.dueTimestamp ||
           left.title.localeCompare(right.title, "es", { sensitivity: "base" })
@@ -749,7 +778,7 @@ export function createPaideiaService({
     return query(options, async (snapshot) => {
       const items = sortText(
         snapshot.materials
-          .filter((item) => matches(`${item.courseId} ${item.course}`, options.course))
+          .filter((item) => belongsToCourse(snapshot, item, options.course))
           .filter((item) => matches(item.section, options.section))
           .filter((item) => !options.type || item.type === options.type || item.kind === options.type)
           .filter((item) => matches(`${item.title} ${item.section} ${item.type}`, options.query)),
@@ -782,7 +811,6 @@ export function createPaideiaService({
       now: now(),
       data: {
         cacheAvailable: Boolean(snapshot),
-        cachePath,
         generatedAt: snapshot?.generatedAt ?? null,
         componentGeneratedAt: snapshot?.componentGeneratedAt ?? null,
         lastSyncCoverage: snapshot?.lastSyncCoverage ?? null,

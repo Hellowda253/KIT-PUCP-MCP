@@ -165,6 +165,7 @@ test("registration search JSON preserves official levels and capacity columns", 
   assert.equal(result.items[0].capacity.vacancies, 30);
   assert.equal(result.items[0].capacity.unitVacancies, 25);
   assert.equal(result.items[0].capacity.registrations, 12);
+  assert.deepEqual(result.items[0].associatedScheduleIds, []);
   assert.equal(result.items[0].internalSelectionRef, "ECO253T0531");
 });
 
@@ -611,7 +612,7 @@ test("schedule search retains only top results and reports deterministic truncat
         courseName: courseCode,
         scheduleId: `${course}-${section}`,
         capacity: { vacancies: 40, registrations: section },
-        sessions: []
+        sessions: [{ day: 'monday', start: `${String(8 + course).padStart(2, '0')}:00`, end: `${String(9 + course).padStart(2, '0')}:00`, kind: 'class' }]
       });
     }
   }

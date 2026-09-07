@@ -131,6 +131,46 @@ test("high-stakes academic activities use a strict evidence ladder without slowi
   assert.match(professor, /jerarqu[ií]a estricta|evidencia estricta/iu);
 });
 
+test("academic material inspection routes by resource type without contradictory download approval", async () => {
+  const router = await read("skills/pucp-academic/SKILL.md");
+  const campus = await read("skills/pucp-academic/references/campus-virtual.md");
+  const paideia = await read("skills/pucp-academic/references/paideia.md");
+  const combined = `${router}\n${campus}\n${paideia}`;
+
+  assert.doesNotMatch(
+    combined,
+    /descarg\w*[^\n]{0,80}(?:solo|únicamente)[^\n]{0,50}(?:petici[oó]n|usuario lo pid)/iu
+  );
+  assert.match(paideia, /pregunta.*contenido.*autoriza.*recuperar|recuperar.*necesari.*responder/isu);
+  assert.match(paideia, /`folder`.*`get_paideia_folder_contents`/isu);
+  assert.match(paideia, /`resource`.*`download_paideia_resource`/isu);
+  assert.match(paideia, /`assignment`.*`quiz`.*`get_activity_details`/isu);
+  assert.match(paideia, /resource_not_folder[\s\S]{0,220}(?:no abandones|ni infieras)/iu);
+  assert.match(campus, /programaci[oó]n.*no.*fuentes inferiores|no.*fuentes inferiores.*programaci[oó]n/isu);
+  assert.match(combined, /ruta|carpeta|ubicaci[oó]n/iu);
+  assert.match(combined, /espacio.*(?:total|ocup)|tama[nñ]o.*acumulado/iu);
+  assert.match(combined, /descarga masiva|archivo grande|volumen considerable/iu);
+  assert.match(combined, /no repit.*(?:cada (?:archivo|descarga)|descarga peque)/isu);
+  assert.match(combined, /sobrescrib.*confirmaci[oó]n/iu);
+});
+
+test("academic calendar bootstrap is mandatory on first use and stale cycles are reverified", async () => {
+  const calendar = await read("skills/pucp-academic/references/academic-calendar.md");
+  const campus = await read("skills/pucp-academic/references/campus-virtual.md");
+  const tools = await read("packages/common/src/academic-calendar.js");
+
+  assert.match(calendar, /primera consulta|primer uso/iu);
+  assert.match(calendar, /antes de responder.*semana|no.*respond.*semana.*hasta/isu);
+  assert.match(calendar, /p[aá]gina oficial.*evidencia|evidencia.*p[aá]gina oficial/isu);
+  assert.match(calendar, /JSON.*no.*PDF|PDF.*evidencia.*JSON/isu);
+  assert.match(calendar, /mayor (?:que|a) 19.*verific/isu);
+  assert.match(calendar, /ciclo (?:vigente|activo).*`set_academic_calendar`|`set_academic_calendar`.*ciclo (?:vigente|activo)/isu);
+  assert.match(calendar, /`courseKeys:\s*\["\*"\]`/u);
+  assert.match(campus, /calendarRegistration/iu);
+  assert.match(tools, /calendarRegistration/u);
+  assert.match(tools, /week_exceeds_19/u);
+});
+
 test("MCP tool metadata carries the same evidence policy for clients without skills", async () => {
   const paideiaTools = await read("servers/paideia/src/tools.js");
   const overviewTools = await read("servers/overview/src/tools.js");

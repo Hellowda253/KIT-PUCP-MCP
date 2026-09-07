@@ -1,6 +1,6 @@
 {
   "name": "set_academic_calendar",
-  "description": "Register or replace one LOCAL program calendar after inspecting its official public PUCP source. Include class start/end, applicable term/program, explicit course ids/codes/names and a short non-personal evidence excerpt. Use separate summer/intensive calendars and published week intervals when available. Does not alter Campus. Verification is caller-reported, not independently checked by the server.",
+  "description": "Register or replace one LOCAL JSON program calendar after inspecting its official public PUCP page or PDF. Include class start/end, applicable term/program and a short non-personal evidence excerpt. Use courseKeys [\"*\"] only when the source applies to every course in that program; otherwise list explicit identifiers. Use separate summer/intensive calendars and published week intervals when available. Does not alter Campus.",
   "parameters": {
     "type": "object",
     "additionalProperties": false,

@@ -1,6 +1,6 @@
 {
   "name": "get_student_schedule",
-  "description": "Return the authenticated student's own recurring weekly pattern from the Campus Horario button, including classes, practices, laboratories, exams, rooms, and overlaps. It describes the usual timetable but does not confirm that a session occurs on a specific calendar date; use Campus agenda for today or the next class. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. calendar_unavailable requires verifying and recording a program calendar, not assuming week 1.",
+  "description": "Return the authenticated student's own recurring weekly pattern from the Campus Horario button, including classes, practices, laboratories, exams, rooms, and overlaps. It describes the usual timetable but does not confirm that a session occurs on a specific calendar date; use Campus agenda for today or the next class. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true on first use or after week 19, inspect the official PUCP page, call set_academic_calendar, and retry before making a week-dependent claim.",
   "parameters": {
     "type": "object",
     "properties": {

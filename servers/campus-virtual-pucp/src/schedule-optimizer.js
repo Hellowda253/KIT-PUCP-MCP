@@ -1,4 +1,5 @@
 import { searchableText } from "./text.js";
+import { buildCourseOptions } from "./schedule-components.js";
 
 export const DEFAULT_SCHEDULE_PREFERENCES = Object.freeze({
   freeDays: [],
@@ -113,6 +114,13 @@ function minutes(value) {
 }
 
 function overlap(left, right) {
+  const leftDate = left.date ?? left.beginDate;
+  const rightDate = right.date ?? right.beginDate;
+  if (leftDate && rightDate && leftDate !== rightDate) return false;
+  if (Array.isArray(left.weeks) && Array.isArray(right.weeks) &&
+      !left.weeks.some(week => right.weeks.includes(week))) return false;
+  if (left.startDate && right.endDate && left.startDate > right.endDate) return false;
+  if (right.startDate && left.endDate && right.startDate > left.endDate) return false;
   return (
     left.day === right.day &&
     minutes(left.start) < minutes(right.end) &&
@@ -141,6 +149,8 @@ function conflictsFor(options) {
           if (!overlap(left, right)) continue;
           conflicts.push({
             kind: "overlap",
+            certainty: [left, right].some(s => /exam/.test(s.kind ?? '') && !(s.date ?? s.beginDate) && !s.weeks?.length)
+              ? "potential" : "confirmed",
             day: left.day,
             start: left.start > right.start ? left.start : right.start,
             end: left.end < right.end ? left.end : right.end,
@@ -154,43 +164,9 @@ function conflictsFor(options) {
   return conflicts;
 }
 
-function buildCourseOptions(offerings) {
-  const byCourse = new Map();
-  for (const offering of offerings) {
-    const code = String(offering.courseCode ?? "").toUpperCase();
-    if (!byCourse.has(code)) byCourse.set(code, []);
-    byCourse.get(code).push({ ...offering, courseCode: code });
-  }
-  const output = new Map();
-  for (const [code, rows] of byCourse) {
-    const referenced = new Set(rows.flatMap((row) => row.associatedScheduleIds ?? []));
-    const roots = rows.filter(
-      (row) =>
-        (row.associatedScheduleIds?.length ?? 0) > 0 &&
-        (row.scheduleType === "class" || !referenced.has(row.scheduleId))
-    );
-    const options = [];
-    const bundled = new Set();
-    for (const root of roots) {
-      const components = [
-        root,
-        ...root.associatedScheduleIds
-          .map((id) => rows.find((row) => row.scheduleId === id))
-          .filter(Boolean)
-      ];
-      for (const component of components) bundled.add(component.scheduleId);
-      options.push({ ...root, components });
-    }
-    for (const row of rows) {
-      if (!bundled.has(row.scheduleId)) options.push(row);
-    }
-    output.set(code, options);
-  }
-  return output;
-}
-
 function hardConstraintReasons(option, preferences) {
   const reasons = new Set();
+  if (option.completenessIssues?.length) reasons.add("incomplete_schedule");
   const sessions = optionSessions(option);
   if (sessions.some(({ day }) => preferences.freeDays.includes(day))) reasons.add("free_days");
   if (sessions.some(({ start }) => minutes(start) < minutes(preferences.earliestStart))) {
@@ -330,6 +306,8 @@ function publicCourse(option) {
       ? option.components.slice(1).map(({ scheduleId }) => scheduleId)
       : option.associatedScheduleIds ?? [],
     professor: option.professor ?? "",
+    term: option.term ?? null,
+    completenessIssues: option.completenessIssues ?? [],
     sessions: optionSessions(option),
     risk: (option.components ?? [option]).map((component) =>
       assessEnrollmentRisk({
@@ -346,9 +324,10 @@ export function evaluateCourseSchedule({ offerings = [], selections = [], prefer
   const selected = [];
   const missing = [];
   for (const selection of selections) {
-    const found = (options.get(String(selection.courseCode).toUpperCase()) ?? []).find(
+    const candidates = (options.get(String(selection.courseCode).toUpperCase()) ?? []).filter(
       (option) => optionIds(option).includes(String(selection.scheduleId))
     );
+    const found = candidates.length === 1 ? candidates[0] : null;
     if (found) selected.push(found);
     else missing.push(selection);
   }
@@ -358,6 +337,7 @@ export function evaluateCourseSchedule({ offerings = [], selections = [], prefer
   if (result.metrics.dayCount > Number(effective.maxDays)) hardReasons.push("max_days");
   return {
     valid: missing.length === 0 && hardReasons.length === 0 && conflicts.length === 0,
+    validationStatus: missing.length || selected.some(o => o.completenessIssues?.length) ? "incomplete" : "complete",
     missing,
     conflicts,
     hardConstraintViolations: [...new Set(hardReasons)],

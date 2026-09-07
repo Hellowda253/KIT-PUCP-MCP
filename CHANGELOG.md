@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Agrupa clase, práctica, laboratorio y examen como una sola opción antes de recomendar o validar horarios; los componentes incompletos ya no pueden aparecer como una combinación válida.
+- Degrada limpiamente las consultas de inscripción cuando la ventana de matrícula está cerrada y conserva como respaldo el horario matriculado y el catálogo vigente.
+- Unifica la resolución de cursos de Paideia por ID, clave y nombre, permite recuperar detalles de actividades bajo demanda y deja de exponer rutas locales en el estado.
+- Distingue cursos en curso o sin calificar de cursos desaprobados y enlaza el horario recurrente real dentro del espacio combinado del curso.
+- Separa la frescura por curso, explicita el alcance de las estadísticas por horario y consolida el contexto académico cuando todos los eventos apuntan al mismo calendario.
+- Convierte la ausencia del calendario académico en una acción de inicialización explícita para el agente, con evidencia oficial y persistencia JSON local.
+- Permite calendarios verificados que cubren un programa completo mediante `courseKeys: ["*"]`.
+- Bloquea cálculos superiores a la semana 19 hasta verificar el ciclo activo y actualizar el registro.
+
 ## 0.3.0 - 2026-08-31
 
 - Añade `get_academic_calendar` y `set_academic_calendar`: registro local de calendarios revisados por el agente, con alcance de programa, ciclo y cursos.

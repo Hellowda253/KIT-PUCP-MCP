@@ -1,6 +1,6 @@
 {
   "name": "evaluate_course_schedule",
-  "description": "Evaluate a selected cached schedule combination for overlaps, hard constraints, capacity risk, and ranking score.",
+  "description": "Evaluate every class, practice, laboratory, and exam in a selected cached schedule combination. Returns incomplete validation instead of valid=true when required components or sessions cannot be resolved.",
   "parameters": {
     "type": "object",
     "properties": {

@@ -1190,6 +1190,19 @@ export function parseRegistrationSearchPayload(value, options = {}) {
       }
     }
   }
+  const knownScheduleIds = new Map();
+  for (const item of items) {
+    const key = `${item.term}\0${item.courseCode}`;
+    if (!knownScheduleIds.has(key)) knownScheduleIds.set(key, new Set());
+    knownScheduleIds.get(key).add(String(item.scheduleId));
+  }
+  for (const item of items) {
+    const known = knownScheduleIds.get(`${item.term}\0${item.courseCode}`);
+    item.associatedScheduleIds = item.associatedScheduleIds.filter(id =>
+      (known.has(String(id)) && String(id) !== String(item.scheduleId)) ||
+      String(id).length >= 4 || /\D/u.test(String(id))
+    );
+  }
   return { state: "available", items };
 }
 

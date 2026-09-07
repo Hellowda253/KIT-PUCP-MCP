@@ -1202,7 +1202,7 @@ export function parseLegacyCurriculumHtml(html) {
       if (!/^[A-Z0-9]{3,12}$/.test(code) || !name) continue;
       const term = cleanText(row[index.term]);
       const grade = cleanText(row[index.grade]);
-      const numericGrade = grade ? number(grade) : null;
+      const numericGrade = /^-?\d+(?:[.,]\d+)?$/u.test(grade) ? number(grade) : null;
       const key = `${code}\0${term}\0${grade}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1218,7 +1218,7 @@ export function parseLegacyCurriculumHtml(html) {
         observation: cleanText(row[index.observation]),
         status:
           numericGrade === null
-            ? "Pendiente"
+            ? "Sin calificar"
             : numericGrade >= 11
               ? "Aprobado"
               : "No aprobado",

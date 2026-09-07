@@ -2,7 +2,8 @@ import {
   McpToolError,
   TTL_SECONDS,
   createEnvelope,
-  readJsonCache
+  readJsonCache,
+  resolveCourse
 } from "@pucp-academic-mcp/common";
 
 const SOURCE = "pucp_academic_overview";
@@ -320,13 +321,12 @@ export function createOverviewService({
 
   async function getCourseWorkspace(options) {
     const sources = await loadSources();
-    const query = searchableText(options.course);
-    const paideiaCourse = (sources.paideia?.courses ?? []).find((course) =>
-      courseMatches(`${course.id} ${course.name} ${course.shortName}`, query)
-    );
-    const campusCourse = campusItems(sources.campus, "enrolled_courses").find(
-      (course) => courseMatches(`${course.code} ${course.name}`, query)
-    );
+    let paideiaCourse;
+    try { paideiaCourse = resolveCourse(sources.paideia?.courses ?? [], options.course); }
+    catch (error) { if (error.code !== 'course_not_found') throw error; }
+    let campusCourse;
+    try { campusCourse = resolveCourse(campusItems(sources.campus, "enrolled_courses"), options.course); }
+    catch (error) { if (error.code !== 'course_not_found') throw error; }
     if (!paideiaCourse && !campusCourse) {
       throw new McpToolError(
         "course_not_found",
@@ -339,8 +339,11 @@ export function createOverviewService({
       campusCourse?.name,
       campusCourse?.code
     ].filter(Boolean);
-    const belongs = (item) =>
-      names.some((name) => courseMatches(`${item.course} ${item.courseCode} ${item.courseId}`, name));
+    const belongs = (item) => (paideiaCourse && String(item.courseId) === String(paideiaCourse.id)) ||
+      (campusCourse && String(item.courseCode ?? item.code ?? '').toUpperCase() === String(campusCourse.code ?? '').toUpperCase()) ||
+      names.some((name) => searchableText(item.course) === searchableText(name));
+    const scheduleModule = sources.campus?.modules?.student_schedule;
+    const agendaModule = sources.campus?.modules?.agenda;
     const courseId = paideiaCourse?.id;
     const announcements = courseId
       ? sources.paideia?.announcements?.[courseId]?.items ?? []
@@ -360,7 +363,20 @@ export function createOverviewService({
       announcements,
       paideiaGrades,
       officialGrades: campusItems(sources.campus, "official_grades").filter(belongs),
-      schedule: campusItems(sources.campus, "agenda").filter(belongs)
+      schedule: campusItems(sources.campus, "student_schedule").filter(belongs),
+      scheduleStatus: {
+        state: scheduleModule?.state ?? "unavailable",
+        source: "student_schedule_page",
+        generatedAt: scheduleModule?.generatedAt ?? null,
+        reason: scheduleModule?.reason ?? null
+      },
+      agenda: campusItems(sources.campus, "agenda").filter(belongs),
+      agendaStatus: {
+        state: agendaModule?.state ?? "unavailable",
+        source: "campus_agenda",
+        generatedAt: agendaModule?.generatedAt ?? null,
+        reason: agendaModule?.reason ?? null
+      }
     });
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "get_campus_day",
-  "description": "Return confirmed Campus agenda events for one specific calendar date (YYYY-MM-DD). An empty result means no confirmed agenda event for that date; do not infer one from the recurring weekly schedule. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. calendar_unavailable requires verifying and recording a program calendar, not assuming week 1.",
+  "description": "Return confirmed Campus agenda events for one specific calendar date (YYYY-MM-DD). An empty result means no confirmed agenda event for that date; do not infer one from the recurring weekly schedule. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true on first use or after week 19, inspect the official PUCP page, call set_academic_calendar, and retry before making a week-dependent claim.",
   "parameters": {
     "type": "object",
     "properties": {

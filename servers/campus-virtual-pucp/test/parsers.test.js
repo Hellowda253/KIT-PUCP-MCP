@@ -539,7 +539,7 @@ test("legacy curriculum result exposes plan totals and normalized course progres
     status: "Aprobado",
     prerequisites: []
   });
-  assert.equal(result.items[1].status, "Pendiente");
+  assert.equal(result.items[1].status, "Sin calificar");
   assert.deepEqual(result.summary, {
     academicUnit: "CIENCIAS E INGENIERIA",
     specialty: "INGENIERÍA INDUSTRIAL",

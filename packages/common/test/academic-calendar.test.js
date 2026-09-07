@@ -64,7 +64,12 @@ test("summer has its own length and explicit week intervals including recess", a
 
 test("unknown programs, new terms and competing calendars never inherit a guessed week", async (t) => {
   const { store } = await setup(t);
-  assert.equal((await store.context({ course: "DEM101" })).state, "calendar_unavailable");
+  const missing = await store.context({ course: "DEM101" });
+  assert.equal(missing.state, "calendar_unavailable");
+  assert.equal(missing.calendarRegistration.required, true);
+  assert.equal(missing.calendarRegistration.action, "register_verified_calendar");
+  assert.equal(missing.calendarRegistration.tool, "set_academic_calendar");
+  assert.match(missing.calendarRegistration.officialSourceHint, /^https:\/\/estudiante\.pucp\.edu\.pe\//u);
   await store.save({ calendar: record });
   assert.equal((await store.context({ course: "OTHER101" })).currentWeek, null);
   assert.equal((await store.context({ course: "DEM101", term: "2027-1" })).currentWeek, null);
@@ -72,6 +77,29 @@ test("unknown programs, new terms and competing calendars never inherit a guesse
   await store.save({ calendar: { ...record, id: "other-program", program: "Otro programa" } });
   assert.equal((await store.context({ course: "DEM101" })).state, "calendar_ambiguous");
   assert.equal((await store.context({ course: "DEM101", program: record.program })).currentWeek, 2);
+});
+
+test("a verified program-wide calendar can initialize future course queries without per-course registration", async (t) => {
+  const { store } = await setup(t);
+  await store.save({ calendar: { ...record, id: "program-wide", courseKeys: ["*"] } });
+  const result = await store.context({ course: "NEW101", term: "2026-2" });
+  assert.equal(result.state, "available");
+  assert.equal(result.calendarId, "program-wide");
+  assert.equal(result.currentWeek, 2);
+});
+
+test("weeks above 19 require verifying the active term instead of exposing a stale week", async (t) => {
+  const { store, setNow } = await setup(t);
+  await store.save({ calendar: { ...record, id: "stale-term", courseKeys: ["*"] } });
+  setNow("2026-12-28T12:00:00Z");
+  const result = await store.context({ course: "DEM101", term: "2026-2" });
+  assert.equal(result.state, "calendar_verification_required");
+  assert.equal(result.currentWeek, null);
+  assert.equal(result.calculatedCurrentWeek, 20);
+  assert.equal(result.calendarRegistration.required, true);
+  assert.equal(result.calendarRegistration.reason, "week_exceeds_19");
+  assert.equal(result.calendarRegistration.action, "verify_active_term_and_update_calendar");
+  assert.equal(result.calendarRegistration.tool, "set_academic_calendar");
 });
 
 test("validation rejects invalid dates, overlapping weeks and private source URLs atomically", async (t) => {
@@ -113,4 +141,19 @@ test("calendar registration is serialized and isolated per profile", async (t) =
   await Promise.all([a.store.save({ calendar: record }), a.store.save({ calendar: { ...record, id: "second", courseKeys: ["SECOND"] } })]);
   assert.equal((await a.store.list()).calendars.length, 2);
   assert.equal((await b.store.list()).calendars.length, 0);
+});
+
+test("aggregate agenda context is derived from matching item calendars", async () => {
+  const temporal = { calendars: [], async context(args) {
+    if (!args.course) return { state: "scope_required", currentWeek: null, referenceWeek: null };
+    return { state: "available", calendarId: "engineering-2026-2", currentWeek: 3,
+      referenceDate: args.date, referenceWeek: args.date?.endsWith('31') ? 3 : 4, weekBasis: "calendar" };
+  } };
+  const [tool] = calendar.withAcademicContext([{ name: "get_campus_agenda", handler: async () => ({ data: { items: [
+    { course: "CUR100", beginDate: "2026-08-31" }, { course: "CUR200", beginDate: "2026-09-07" }
+  ] } }) }], temporal);
+  const result = await tool.handler({ start: "2026-08-31" });
+  assert.equal(result.data.academicContext.state, "available");
+  assert.equal(result.data.academicContext.calendarId, "engineering-2026-2");
+  assert.deepEqual(result.data.academicContext.referenceWeeks, [3, 4]);
 });

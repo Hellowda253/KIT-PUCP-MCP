@@ -1,6 +1,6 @@
 {
   "name": "get_academic_calendar",
-  "description": "Read locally registered program/term calendars and compute weeks from the current server clock in America/Lima. Optional date computes a separate reference week. No Campus session or terminal required. Missing calendars must be verified at an official source before registration.",
+  "description": "Read locally registered program/term calendars and compute weeks from the current server clock in America/Lima. On first use, calendarRegistration.required instructs the agent to inspect the official PUCP calendar page and call set_academic_calendar before answering a week-dependent question. A computed week above 19 requires verifying the active term and updating the record.",
   "parameters": {
     "type": "object",
     "additionalProperties": false,

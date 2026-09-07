@@ -19,3 +19,4 @@ export {
   SUPPORTED_PROTOCOL_VERSION,
   createStdioMcpServer
 } from "./stdio-server.js";
+export { resolveCourse } from './course-resolver.js';

@@ -703,8 +703,6 @@ export function createCampusService({
       /matr[ií]cula extempor[aá]nea/i.test(action.label ?? "") &&
       action.access !== "blocked"
     );
-    if (extemporaneousAdvertised) return true;
-
     const current = Date.parse(now());
     if (!Number.isFinite(current)) return true;
     const windows = (snapshot.modules?.enrollment_calendar?.items ?? [])
@@ -722,7 +720,7 @@ export function createCampusService({
     if (windowStarts.length > 0 && current < Math.min(...windowStarts)) {
       return regularAdvertised;
     }
-    return regularAdvertised || windows.length === 0;
+    return regularAdvertised || extemporaneousAdvertised || windows.length === 0;
   }
 
   function scheduleQuery(options, snapshot, { historical = false } = {}) {
@@ -934,6 +932,21 @@ export function createCampusService({
       .sort((left, right) => String(right.generatedAt).localeCompare(String(left.generatedAt)))[0] ?? null;
   }
 
+  function statisticsWithScope(data, reference, options = {}) {
+    const reportSchedule = String(data?.schedule ?? "").trim() || null;
+    const resolvedSchedule = reportSchedule || String(reference?.schedule ?? "").trim() || null;
+    return {
+      ...data,
+      schedule: resolvedSchedule ?? "",
+      scope: {
+        requestedSchedule: String(options.schedule ?? "").trim() || null,
+        resolvedSchedule,
+        reportSchedule,
+        kind: resolvedSchedule ? "schedule" : "course"
+      }
+    };
+  }
+
   async function getGradeStatistics(kind, options) {
     const snapshot = await readSnapshot();
     const lookup = gradeStatisticsReference(kind, options, snapshot);
@@ -975,7 +988,7 @@ export function createCampusService({
       return envelope(
         snapshot,
         cached.generatedAt,
-        cached.data,
+        statisticsWithScope(cached.data, reference, options),
         TTL_SECONDS.academic
       );
     }
@@ -988,7 +1001,7 @@ export function createCampusService({
             ? await adapter.getPartialGradeStatistics(reference)
             : await adapter.getFinalGradeStatistics(reference);
         const generatedAt = result.retrievedAt ?? now();
-        const data = {
+        const data = statisticsWithScope({
           ...result,
           state: "available",
           reference: {
@@ -1003,7 +1016,7 @@ export function createCampusService({
                 }
               : {})
           }
-        };
+        }, reference, options);
         await persistGradeStatistics(key, { generatedAt, data });
         return data;
       },
@@ -1014,7 +1027,7 @@ export function createCampusService({
       return envelope(
         snapshot,
         cached.generatedAt,
-        { ...cached.data, refreshJobId: job.jobId },
+        { ...statisticsWithScope(cached.data, reference, options), refreshJobId: job.jobId },
         TTL_SECONDS.academic,
         [
           "Cached grade statistics were returned while Campus refreshes this exact institutional report."
@@ -1290,8 +1303,14 @@ export function createCampusService({
       100
     );
   const getCurriculumProgress = (options = {}) =>
-    queryModule("curriculum", options, async (entry) => {
+    queryModule("curriculum", options, async (entry, snapshot) => {
+      const enrolled = snapshot.modules?.enrolled_courses?.items ?? [];
       const items = [...(entry.items ?? [])]
+        .map(item => item.status === "Sin calificar" && enrolled.some(course =>
+          String(course.code ?? course.courseCode).toUpperCase() === String(item.code).toUpperCase() &&
+          (!item.term || !course.term || item.term === course.term))
+          ? { ...item, status: "En curso" }
+          : item)
         .filter(
           (item) =>
             matches(`${item.code} ${item.name}`, options.query) &&
@@ -1513,19 +1532,25 @@ export function createCampusService({
         "The Campus adapter does not support the live Inscríbete aquí workspace"
       );
     }
-    const workspace = await adapter.readRegistrationWorkspace({
-      metadataOnly: true,
-      allowDownloads: false,
-      allowMutations: false,
-      courseCodes: filters.courseCodes ?? [],
-      courseName: filters.courseName ?? "",
-      academicScope: filters.academicScope ?? null
-    });
+    let workspace;
+    try {
+      workspace = await adapter.readRegistrationWorkspace({
+        metadataOnly: true, allowDownloads: false, allowMutations: false,
+        courseCodes: filters.courseCodes ?? [], courseName: filters.courseName ?? "",
+        academicScope: filters.academicScope ?? null
+      });
+    } catch (error) {
+      const code = String(error?.code ?? "").toLowerCase();
+      if (["registration_portal_not_visible", "role_unavailable", "not_visible"].includes(code)) {
+        return { state: "unavailable", reason: code, enrollmentMode: "closed_or_unavailable",
+          activeTerm: null, registered: [], scopes: { faculties: [], specialties: [] }, retrievedAt: now() };
+      }
+      throw error;
+    }
     if (workspace?.state !== "available" || !workspace.activeTerm) {
-      throw new McpToolError(
-        "registration_portal_unavailable",
-        "The active Inscríbete aquí portal is not available"
-      );
+      return { state: "unavailable", reason: workspace?.reason ?? "registration_portal_unavailable",
+        enrollmentMode: "closed_or_unavailable", activeTerm: null, registered: [],
+        scopes: { faculties: [], specialties: [] }, retrievedAt: workspace?.retrievedAt ?? now() };
     }
     return {
       ...workspace,
@@ -1549,6 +1574,7 @@ export function createCampusService({
       workspace.retrievedAt ?? now(),
       {
         state: workspace.state,
+        reason: workspace.reason ?? null,
         enrollmentMode: workspace.enrollmentMode,
         activeTerm: workspace.activeTerm,
         turn: workspace.turn ?? null,
@@ -1570,11 +1596,13 @@ export function createCampusService({
       {
         state: workspace.state,
         portalState: workspace.state,
+        reason: workspace.reason ?? null,
         enrollmentMode: workspace.enrollmentMode,
         activeTerm: workspace.activeTerm,
         turn: workspace.turn ?? null,
         summary: workspace.summary ?? {},
         registered: (workspace.registered ?? []).map(publicRegistrationItem),
+        fallbackTools: workspace.state === "available" ? [] : ["list_enrolled_courses", "get_student_schedule", "search_course_schedules"],
         source: "enrollment_portal",
         sourcesUsed: ["enrollment_portal"]
       },
@@ -1594,6 +1622,7 @@ export function createCampusService({
       workspace.retrievedAt ?? now(),
       {
         state: workspace.state,
+        reason: workspace.reason ?? null,
         enrollmentMode: workspace.enrollmentMode,
         activeTerm: workspace.activeTerm,
         faculties: (workspace.scopes?.faculties ?? []).map((item) => ({
@@ -1686,6 +1715,7 @@ export function createCampusService({
     const workspace = await readLiveRegistrationWorkspace({
       courseCodes: add.map(({ courseCode }) => courseCode)
     });
+    if (workspace.state !== "available") throw new McpToolError("registration_portal_unavailable", "Registration is closed or unavailable");
     if (workspace.enrollmentMode !== "regular") {
       throw new McpToolError(
         "registration_write_unverified_mode",
@@ -1783,6 +1813,7 @@ export function createCampusService({
     const workspace = await readLiveRegistrationWorkspace({
       courseCodes: token.addCourseCodes
     });
+    if (workspace.state !== "available") throw new McpToolError("registration_portal_unavailable", "Registration is closed or unavailable");
     if (workspace.enrollmentMode !== "regular") {
       throw new McpToolError(
         "registration_write_unverified_mode",
@@ -2140,19 +2171,22 @@ export function createCampusService({
     const courseCodes = options.courseCodes ?? options.selections?.map(({ courseCode }) => courseCode) ?? [];
     const cache = await readScheduleCache();
     const offerings = matchingScheduleItems(cache, { term, courseCodes });
+    const normalizedCodes = [...new Set(courseCodes.map((code) => String(code).toUpperCase()))];
     const present = new Set(offerings.map(({ courseCode }) => String(courseCode).toUpperCase()));
-    const missing = [...new Set(courseCodes.map((code) => String(code).toUpperCase()))]
+    const missing = normalizedCodes
       .filter((code) => !present.has(code));
-    const newest = cache.entries
-      .filter((entry) => (entry.items ?? []).some((item) => offerings.includes(item)))
-      .sort((left, right) => String(right.generatedAt).localeCompare(String(left.generatedAt)))[0];
-    const stale = shouldRefresh({
-      forceRefresh: Boolean(options.forceRefresh),
-      generatedAt: newest?.generatedAt,
-      now: now(),
-      ttlSeconds: scheduleTtl(snapshot)
-    });
-    const refreshCodes = missing.length > 0 ? missing : stale ? courseCodes : [];
+    const evidence = normalizedCodes.map(courseCode => ({
+      courseCode,
+      entry: cache.entries.filter(entry => entry.query?.mode !== "historical" &&
+        (entry.items ?? []).some(item => String(item.courseCode).toUpperCase() === courseCode &&
+          (!term || term === "active" || !item.term || item.term === term)))
+        .sort((left, right) => String(right.generatedAt).localeCompare(String(left.generatedAt)))[0] ?? null
+    }));
+    const staleCodes = evidence.filter(({ entry }) => entry && shouldRefresh({
+      forceRefresh: Boolean(options.forceRefresh), generatedAt: entry.generatedAt,
+      now: now(), ttlSeconds: scheduleTtl(snapshot)
+    })).map(({ courseCode }) => courseCode);
+    const refreshCodes = [...new Set([...missing, ...staleCodes])];
     const job = refreshCodes.length > 0
       ? startScheduleSearch(
           scheduleQuery({ courseCodes: refreshCodes }, snapshot),
@@ -2172,10 +2206,17 @@ export function createCampusService({
     }
     const local = await readJsonCache(preferencesPath, { fallback: {} });
     const data = await operation({ offerings, local, term, snapshot });
+    data.evidence = evidence.map(({ courseCode, entry }) => ({
+      courseCode, generatedAt: entry?.generatedAt ?? null, retrievedAt: entry?.retrievedAt ?? null,
+      stale: !entry || staleCodes.includes(courseCode)
+    }));
     if (job) data.refreshJobId = job.jobId;
+    const availableEvidence = evidence.map(({ entry }) => entry).filter(Boolean)
+      .sort((left, right) => String(left.generatedAt).localeCompare(String(right.generatedAt)));
+    const oldest = availableEvidence[0];
     return envelope(
-      { ...snapshot, retrievedAt: newest?.retrievedAt ?? snapshot.retrievedAt },
-      newest?.generatedAt ?? snapshot.generatedAt,
+      { ...snapshot, retrievedAt: oldest?.retrievedAt ?? snapshot.retrievedAt },
+      oldest?.generatedAt ?? snapshot.generatedAt,
       data,
       scheduleTtl(snapshot),
       job ? ["Cached schedules were used while the complete requested course batch refreshes."] : []

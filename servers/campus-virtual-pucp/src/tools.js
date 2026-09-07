@@ -333,13 +333,13 @@ export function createCampusTools(service) {
     },
     {
       name: "recommend_course_schedules",
-      description: "Generate and rank active-term non-conflicting schedules from the best currently available Campus source; never enrolls or controls the Campus generator.",
+      description: "Generate and rank active-term schedules after grouping every class, practice, laboratory, and exam belonging to each selected schedule. Incomplete component evidence is rejected rather than reported as conflict-free; never enrolls or controls the Campus generator.",
       inputSchema: schema({ courseCodes, preferences, maxResults: { type: "integer", minimum: 1, maximum: 20 }, ...refresh }, ["courseCodes"]),
       handler: (args) => service.recommendCourseSchedules(args)
     },
     {
       name: "evaluate_course_schedule",
-      description: "Evaluate a selected cached schedule combination for overlaps, hard constraints, capacity risk, and ranking score.",
+      description: "Evaluate every class, practice, laboratory, and exam in a selected cached schedule combination. Returns incomplete validation instead of valid=true when required components or sessions cannot be resolved.",
       inputSchema: schema({
         selections: {
           type: "array",

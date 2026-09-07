@@ -414,6 +414,30 @@ test("forced schedule recommendation refreshes the full requested course batch",
   assert.deepEqual(seen[0].courseCodes, ["1IND50", "1IND51"]);
 });
 
+test("schedule recommendation refreshes each stale course instead of trusting the newest course", async () => {
+  const seen = [];
+  const old = "2026-07-20T10:00:00.000Z";
+  const fresh = "2026-07-24T10:29:00.000Z";
+  const offering = (courseCode, generatedAt, hour) => ({
+    courseCode, courseName: courseCode, term: "2026-2", scheduleId: "01",
+    scheduleType: "class", associatedScheduleIds: [],
+    sessions: [{ day: "monday", start: hour, end: `${Number(hour.slice(0, 2)) + 1}:00`, kind: "class" }],
+    retrievedAt: generatedAt
+  });
+  const { service } = await setup({ scheduleCache: { entries: [
+    { generatedAt: old, retrievedAt: old, query: { mode: "current", term: "2026-2", courseCodes: ["OLD100"] }, items: [offering("OLD100", old, "08:00")] },
+    { generatedAt: fresh, retrievedAt: fresh, query: { mode: "current", term: "2026-2", courseCodes: ["NEW100"] }, items: [offering("NEW100", fresh, "10:00")] }
+  ] }, adapter: { sync: async () => snapshot, async searchScheduleCatalog(input) {
+    seen.push(input); return { state: "available", retrievedAt: fresh, items: [] };
+  } } });
+  const result = await service.recommendCourseSchedules({ courseCodes: ["OLD100", "NEW100"] });
+  assert.equal(result.cache.generatedAt, old);
+  assert.equal(result.data.evidence.find(item => item.courseCode === "OLD100").stale, true);
+  assert.equal(result.data.evidence.find(item => item.courseCode === "NEW100").stale, false);
+  await service.waitForIdle();
+  assert.deepEqual(seen[0].courseCodes, ["OLD100"]);
+});
+
 test("academic schedule scope preserves visible names and official curriculum level", async () => {
   const seen = [];
   const { service } = await setup({
@@ -1205,6 +1229,13 @@ test("grade statistics resolve only cached institutional references and persist 
   });
   assert.equal(completed.data.status, "completed");
   assert.equal(completed.data.result.summary.mean, 10.45);
+  assert.equal(completed.data.result.schedule, "0831");
+  assert.deepEqual(completed.data.result.scope, {
+    requestedSchedule: null,
+    resolvedSchedule: "0831",
+    reportSchedule: null,
+    kind: "schedule"
+  });
 
   const cached = await service.getPartialGradeStatistics({
     course: "IEE272",
@@ -1214,6 +1245,7 @@ test("grade statistics resolve only cached institutional references and persist 
   });
   assert.equal(cached.data.state, "available");
   assert.equal(cached.data.summary.median, 10);
+  assert.equal(cached.data.scope.resolvedSchedule, "0831");
   assert.equal(calls.length, 1);
 
   const finalQueued = await service.getFinalGradeStatistics({
