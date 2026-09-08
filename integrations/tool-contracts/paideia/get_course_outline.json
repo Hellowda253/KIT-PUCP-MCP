@@ -1,6 +1,6 @@
 {
   "name": "get_course_outline",
-  "description": "Return cached sections and compact activity samples for one unambiguous course. For an assignment or TA, practical, lab, or exam topic, use authorized email > explicit Paideia instructions > current syllabus > materials. Stop on a clear instruction and label the result confirmed, scheduled, or inferred. An ordinary class uses the fast academic-week flow. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true on first use or after week 19, inspect the official PUCP page, call set_academic_calendar, and retry before making a week-dependent claim.",
+  "description": "Return cached sections and compact activity samples for one unambiguous course. For an assignment or TA, practical, lab, or exam topic, use authorized email > explicit Paideia instructions > current syllabus > materials. Stop on a clear instruction and label the result confirmed, scheduled, or inferred. An ordinary class uses the fast academic-week flow. Includes live-clock academicContext from the curated KIT PUCP calendar registry. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true, refresh the registry with get_academic_calendar and report a missing term honestly; use set_academic_calendar only as a temporary local fallback.",
   "parameters": {
     "type": "object",
     "properties": {

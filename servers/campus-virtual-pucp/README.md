@@ -55,8 +55,13 @@ por curso y unidad se aplican localmente sobre el reporte completo. Que un curso
 aparezca no prueba que el alumno pueda llevarlo: debe contrastarse con
 `list_allowed_courses` y las restricciones visibles de matrícula.
 
-`get_registration_status` consulta en vivo `BuscarCursosInscritos` y conserva
-la `Posic. Relat.` exacta del horario principal. Los horarios asociados que no
+`get_registration_status` consulta en vivo `BuscarCursosInscritos` durante una
+ventana de matrícula. Cuando las fechas publicadas ya terminaron, omite la
+navegación y devuelve inmediatamente `outside_registration_window`; si esas
+fechas no están disponibles, una semana académica verificada mayor a 1 funciona
+como respaldo. `forceProbe: true` permite una única comprobación ante una
+reapertura excepcional confirmada. Cuando el portal está activo conserva la
+`Posic. Relat.` exacta del horario principal. Los horarios asociados que no
 tienen una posición independiente se marcan `not_applicable`.
 `get_course_schedule_details` reúne sesiones, docentes, aulas, capacidad y
 riesgo; usa la misma posición viva para `capacity.userPosition` cuando la vista

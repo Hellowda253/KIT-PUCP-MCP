@@ -136,6 +136,7 @@ async function setup(options = {}) {
     preferencesPath,
     adapter,
     now: options.now ?? (() => "2026-07-24T10:30:00.000Z"),
+    academicCalendarContext: options.academicCalendarContext,
     maxActiveDownloads: options.maxActiveDownloads ?? 2,
     jobTtlSeconds: options.jobTtlSeconds ?? 3600,
     maxRetainedJobs: options.maxRetainedJobs ?? 100
@@ -171,6 +172,64 @@ test("enrollment portal, reports, schedules, preferences, and optimizer use stab
   assert.equal(results[6].data.recommendations.length, 2);
   assert.equal(results[7].data.valid, true);
   assert.deepEqual(results[7].data.preferences.freeDays, ["friday"]);
+});
+
+test("student schedule enriches three courses with one batch and retries only an omitted course", async () => {
+  const personal = structuredClone(snapshot);
+  personal.modules.student_schedule = {
+    state: "available",
+    generatedAt,
+    term: "2026-2",
+    items: [
+      { courseCode: "CUR101", courseName: "Curso 1", term: "2026-2", scheduleId: "0101", scheduleType: "class", day: "monday", start: "08:00", end: "10:00", room: "A101", modality: "in_person" },
+      { courseCode: "CUR102", courseName: "Curso 2", term: "2026-2", scheduleId: "0102", scheduleType: "class", day: "tuesday", start: "10:00", end: "12:00", room: "A102", modality: "in_person" },
+      { courseCode: "CUR103", courseName: "Curso 3", term: "2026-2", scheduleId: "0103", scheduleType: "class", day: "wednesday", start: "12:00", end: "14:00", room: "A103", modality: "in_person" }
+    ]
+  };
+  const searches = [];
+  const offering = (courseCode, scheduleId) => ({
+    courseCode,
+    courseName: `Detalle ${courseCode}`,
+    term: "2026-2",
+    scheduleId,
+    scheduleType: "class",
+    associatedScheduleIds: [],
+    professor: `Docente ${courseCode}`,
+    sessions: [{ day: "monday", start: "08:00", end: "10:00", room: "A101", kind: "class" }]
+  });
+  const adapter = {
+    async searchCurrentCourseSchedules(input) {
+      searches.push(input.courseCodes);
+      const codes = input.courseCodes;
+      const items = codes.length > 1
+        ? [offering("CUR101", "0101"), offering("CUR102", "0102")]
+        : [offering("CUR103", "0103")];
+      return { state: "available", items, source: "schedule_catalog", retrievedAt: "2026-07-24T10:30:00.000Z" };
+    }
+  };
+  const { service } = await setup({
+    snapshot: personal,
+    scheduleCache: { entries: [] },
+    adapter
+  });
+
+  const pending = await service.getStudentSchedule({});
+  assert.equal(pending.data.state, "pending_enrichment");
+  assert.equal(pending.data.answerReady, false);
+  assert.deepEqual(pending.data.missingCourses, ["CUR101", "CUR102", "CUR103"]);
+  await service.waitForIdle();
+  const complete = await service.getStudentSchedule({});
+
+  assert.deepEqual(searches, [
+    ["CUR101", "CUR102", "CUR103"],
+    ["CUR103"]
+  ]);
+  assert.equal(complete.data.state, "available");
+  assert.equal(complete.data.answerReady, true);
+  assert.deepEqual(
+    complete.data.items.map((item) => item.professor),
+    ["Docente CUR101", "Docente CUR102", "Docente CUR103"]
+  );
 });
 
 test("enrollment eligibility remains useful when the base enrollment module is unavailable", async () => {
@@ -215,6 +274,145 @@ test("registration status preserves the live turn and portal summary", async () 
   assert.deepEqual(result.data.turn, { raw: "Turno 42", order: 42 });
   assert.deepEqual(result.data.summary, { registeredCourses: 5, credits: 18.5 });
   assert.equal(result.data.portalState, "available");
+});
+
+test("registration status skips the live portal after the published enrollment window", async () => {
+  let probes = 0;
+  const { service } = await setup({
+    now: () => "2026-09-06T15:00:00.000Z",
+    adapter: {
+      async readRegistrationWorkspace() {
+        probes += 1;
+        throw new Error("the calendar guard should prevent this probe");
+      }
+    }
+  });
+
+  const result = await service.getRegistrationStatus();
+
+  assert.equal(probes, 0);
+  assert.equal(result.data.state, "unavailable");
+  assert.equal(result.data.reason, "outside_registration_window");
+  assert.equal(result.data.source, "enrollment_calendar_guard");
+  assert.deepEqual(result.data.sourcesUsed, ["enrollment_calendar"]);
+  assert.equal(result.cache.stale, false);
+});
+
+test("academic week guard is a fallback and forceProbe bypasses it", async () => {
+  const noEnrollmentDates = structuredClone(snapshot);
+  noEnrollmentDates.modules.enrollment_calendar = {
+    state: "unavailable",
+    generatedAt,
+    items: [],
+    reason: "not_visible"
+  };
+  let probes = 0;
+  const adapter = {
+    async readRegistrationWorkspace() {
+      probes += 1;
+      return {
+        state: "available",
+        enrollmentMode: "regular",
+        activeTerm: "2026-2",
+        retrievedAt: "2026-09-06T15:00:00.000Z",
+        turn: null,
+        summary: {},
+        registered: []
+      };
+    }
+  };
+  const { service } = await setup({
+    snapshot: noEnrollmentDates,
+    now: () => "2026-09-06T15:00:00.000Z",
+    adapter,
+    academicCalendarContext: async ({ term }) => ({
+      state: "available",
+      term,
+      currentWeek: 3,
+      currentDate: "2026-09-06",
+      calendarId: "engineering-2026-2"
+    })
+  });
+
+  const guarded = await service.getRegistrationStatus();
+  assert.equal(probes, 0);
+  assert.equal(guarded.data.reason, "outside_registration_window");
+  assert.equal(guarded.data.source, "academic_calendar_guard");
+  assert.equal(guarded.data.academicContext.currentWeek, 3);
+
+  const forced = await service.getRegistrationStatus({ forceProbe: true });
+  assert.equal(probes, 1);
+  assert.equal(forced.data.state, "available");
+  assert.equal(forced.data.source, "enrollment_portal");
+});
+
+test("an explicitly active enrollment window overrides the academic week fallback", async () => {
+  const exceptionalWindow = structuredClone(snapshot);
+  exceptionalWindow.modules.enrollment_calendar.items = [{
+    id: "extraordinary",
+    title: "Matrícula extemporánea",
+    start: "2026-09-06T08:00:00-05:00",
+    end: "2026-09-06T21:00:00-05:00"
+  }];
+  let probes = 0;
+  const { service } = await setup({
+    snapshot: exceptionalWindow,
+    now: () => "2026-09-06T15:00:00.000Z",
+    academicCalendarContext: async () => ({ state: "available", currentWeek: 3 }),
+    adapter: {
+      async readRegistrationWorkspace() {
+        probes += 1;
+        return {
+          state: "available",
+          enrollmentMode: "extemporaneous",
+          activeTerm: "2026-2",
+          retrievedAt: "2026-09-06T15:00:00.000Z",
+          summary: {},
+          registered: []
+        };
+      }
+    }
+  });
+
+  const result = await service.getRegistrationStatus();
+
+  assert.equal(probes, 1);
+  assert.equal(result.data.state, "available");
+  assert.equal(result.data.enrollmentMode, "extemporaneous");
+});
+
+test("an enrollment window from a previous term does not close the active term", async () => {
+  const staleCalendar = structuredClone(snapshot);
+  staleCalendar.modules.enrollment_calendar.items = [{
+    id: "old-enrollment",
+    title: "Matrícula vía Campus Virtual",
+    term: "2026-1",
+    start: "2026-03-10T08:00:00-05:00",
+    end: "2026-03-12T21:00:00-05:00"
+  }];
+  let probes = 0;
+  const { service } = await setup({
+    snapshot: staleCalendar,
+    now: () => "2026-07-24T15:00:00.000Z",
+    adapter: {
+      async readRegistrationWorkspace() {
+        probes += 1;
+        return {
+          state: "available",
+          enrollmentMode: "regular",
+          activeTerm: "2026-2",
+          retrievedAt: "2026-07-24T15:00:00.000Z",
+          summary: {},
+          registered: []
+        };
+      }
+    }
+  });
+
+  const result = await service.getRegistrationStatus();
+
+  assert.equal(probes, 1);
+  assert.equal(result.data.state, "available");
 });
 
 test("course participants are returned live without exposing email by default", async () => {
@@ -410,8 +608,9 @@ test("forced schedule recommendation refreshes the full requested course batch",
   assert.match(result.data.refreshJobId, /^course-schedules-/);
   assert.match(result.warnings[0], /refresh/i);
   await service.waitForIdle();
-  assert.equal(seen.length, 1);
+  assert.equal(seen.length, 3);
   assert.deepEqual(seen[0].courseCodes, ["1IND50", "1IND51"]);
+  assert.deepEqual(seen.slice(1).map(({ courseCodes }) => courseCodes), [["1IND50"], ["1IND51"]]);
 });
 
 test("schedule recommendation refreshes each stale course instead of trusting the newest course", async () => {
@@ -625,6 +824,46 @@ test("current schedule search skips the registration portal after the published 
   const result = await service.searchCourseSchedules({ courseCodes: ["1IND50"] });
   assert.equal(result.data.source, "schedule_catalog");
   assert.match(result.warnings.join(" "), /differ/i);
+});
+
+test("current schedule search uses academic week fallback when enrollment dates are unavailable", async () => {
+  const noEnrollmentDates = structuredClone(snapshot);
+  noEnrollmentDates.modules.enrollment_calendar = {
+    state: "unavailable",
+    generatedAt,
+    items: [],
+    reason: "not_visible"
+  };
+  const seen = [];
+  const { service } = await setup({
+    snapshot: noEnrollmentDates,
+    now: () => "2026-09-06T15:00:00.000Z",
+    scheduleCache: { entries: [] },
+    academicCalendarContext: async () => ({
+      state: "available",
+      currentWeek: 3,
+      term: "2026-2"
+    }),
+    adapter: {
+      async searchCurrentCourseSchedules(input) {
+        seen.push(input);
+        return {
+          state: "available",
+          activeTerm: "2026-2",
+          source: "schedule_catalog",
+          sourcesUsed: ["schedule_catalog"],
+          retrievedAt: "2026-09-06T15:00:00.000Z",
+          items: []
+        };
+      }
+    }
+  });
+
+  await service.searchCourseSchedules({ courseCodes: ["1IND50"] });
+  await service.waitForIdle();
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].preferRegistrationPortal, false);
 });
 
 test("historical schedule search is isolated from the current enrollment cache and uses the shared catalog source", async () => {
@@ -1286,4 +1525,113 @@ test("partial statistics distinguish an existing assessment whose statistics are
   });
   assert.equal(result.data.state, "unavailable");
   assert.equal(result.data.reason, "statistics_not_published");
+});
+
+test("final statistics do not start a scrape while the final grade is unpublished", async () => {
+  const current = structuredClone(snapshot);
+  current.modules.official_grades.items = [{
+    courseCode: "1MEC10",
+    course: "Procesos de Manufactura",
+    item: "Nota final",
+    grade: "--",
+    status: "No oficial",
+    term: "2026-2",
+    statistics: {
+      kind: "final",
+      courseCode: "1MEC10",
+      year: "2026",
+      cycle: "02",
+      cycleType: "00",
+      faculty: "12",
+      meritType: "1",
+      schedule: "0834"
+    }
+  }];
+  let calls = 0;
+  const { service } = await setup({
+    snapshot: current,
+    adapter: {
+      async getFinalGradeStatistics() {
+        calls += 1;
+        throw new Error("must not scrape an unpublished report");
+      }
+    }
+  });
+
+  const result = await service.getFinalGradeStatistics({
+    course: "1MEC10",
+    term: "2026-2"
+  });
+
+  assert.equal(result.data.state, "unavailable");
+  assert.equal(result.data.reason, "statistics_not_published");
+  assert.equal(calls, 0);
+});
+
+test("agenda change history compares only the overlapping date range", async () => {
+  const broad = structuredClone(snapshot);
+  broad.modules.agenda = {
+    state: "available",
+    generatedAt,
+    range: { start: "2026-08-17", end: "2026-12-12" },
+    items: [
+      { id: "past", beginDate: "2026-08-31", title: "Clase pasada" },
+      { id: "shared", beginDate: "2026-09-10", title: "Clase vigente" },
+      { id: "future", beginDate: "2026-10-20", title: "Clase futura" }
+    ]
+  };
+  const narrow = structuredClone(broad);
+  narrow.generatedAt = "2026-09-07T15:00:00.000Z";
+  narrow.modules.agenda = {
+    state: "available",
+    generatedAt: narrow.generatedAt,
+    range: { start: "2026-09-07", end: "2026-09-14" },
+    items: [{ id: "shared", beginDate: "2026-09-10", title: "Clase vigente" }]
+  };
+  const { service } = await setup({
+    snapshot: broad,
+    now: () => narrow.generatedAt,
+    adapter: { async sync() { return narrow; } }
+  });
+
+  await service.syncCampusVirtual({ start: "2026-09-07", end: "2026-09-14" });
+  await service.waitForIdle();
+  const history = await service.listCampusChanges({ module: "agenda" });
+  const change = history.data.syncs[0].modules.agenda;
+
+  assert.equal(change.addedCount, 0);
+  assert.equal(change.removedCount, 0);
+  assert.equal(change.changed, false);
+  assert.deepEqual(change.scope.compared, {
+    start: "2026-09-07",
+    end: "2026-09-14"
+  });
+  assert.equal(change.scope.mode, "intersection");
+});
+
+test("legacy agenda diffs without temporal scope are not exposed as real removals", async () => {
+  const { service, dir } = await setup();
+  await writeFile(path.join(dir, "history.json"), JSON.stringify([{
+    jobId: "legacy-sync",
+    syncedAt: generatedAt,
+    modules: {
+      agenda: {
+        changed: true,
+        addedCount: 0,
+        removedCount: 98,
+        changedCount: 0,
+        added: [],
+        removed: ["event-1", "event-2"],
+        updated: []
+      }
+    }
+  }]));
+
+  const history = await service.listCampusChanges({ module: "agenda" });
+  const change = history.data.syncs[0].modules.agenda;
+
+  assert.equal(change.changed, false);
+  assert.equal(change.removedCount, 0);
+  assert.equal(change.reason, "legacy_scope_unknown");
+  assert.equal(change.scope.mode, "legacy_unscoped");
 });

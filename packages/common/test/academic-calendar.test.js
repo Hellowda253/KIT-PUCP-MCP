@@ -16,9 +16,148 @@ async function setup(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "pucp-calendar-"));
   let instant = "2026-08-31T04:59:59Z";
   const filePath = path.join(dir, "calendars.json");
-  const store = calendar.createAcademicCalendarStore({ filePath, now: () => instant });
+  const store = calendar.createAcademicCalendarStore({ filePath, now: () => instant, registryUrl: null });
   return { store, filePath, setNow(value) { instant = value; } };
 }
+
+test("curated repository calendar initializes academic context without agent registration", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "pucp-calendar-registry-"));
+  let fetches = 0;
+  const store = calendar.createAcademicCalendarStore({
+    filePath: path.join(dir, "local.json"),
+    registryCachePath: path.join(dir, "registry-cache.json"),
+    bundledRegistryPath: null,
+    registryUrl: "https://raw.githubusercontent.com/Hellowda253/KIT-PUCP-MCP/main/config/academic-calendars.json",
+    now: () => "2026-09-07T15:00:00.000Z",
+    fetchImpl: async () => {
+      fetches += 1;
+      return {
+        ok: true,
+        async json() {
+          return {
+            schemaVersion: 1,
+            updatedAt: "2026-09-06T12:00:00.000Z",
+            calendars: [{ ...record, id: "public-2026-2", courseKeys: ["*"] }]
+          };
+        }
+      };
+    }
+  });
+
+  const first = await store.context({ course: "NEW101", term: "2026-2" });
+  const second = await store.context({ course: "OTHER101", term: "2026-2" });
+
+  assert.equal(first.state, "available");
+  assert.equal(first.currentWeek, 4);
+  assert.equal(first.source.verification, "repository_curated");
+  assert.equal(second.calendarId, "public-2026-2");
+  assert.equal(fetches, 1);
+});
+
+test("cached repository calendar survives a later GitHub outage", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "pucp-calendar-registry-cache-"));
+  const options = {
+    filePath: path.join(dir, "local.json"),
+    registryCachePath: path.join(dir, "registry-cache.json"),
+    bundledRegistryPath: null,
+    registryUrl: "https://raw.githubusercontent.com/Hellowda253/KIT-PUCP-MCP/main/config/academic-calendars.json",
+    now: () => "2026-09-07T15:00:00.000Z"
+  };
+  const registry = {
+    schemaVersion: 1,
+    updatedAt: "2026-09-06T12:00:00.000Z",
+    calendars: [{ ...record, id: "public-2026-2", courseKeys: ["*"] }]
+  };
+  const online = calendar.createAcademicCalendarStore({
+    ...options,
+    fetchImpl: async () => ({ ok: true, async json() { return registry; } })
+  });
+  assert.equal((await online.context({ course: "DEM101", term: "2026-2" })).state, "available");
+
+  const offline = calendar.createAcademicCalendarStore({
+    ...options,
+    now: () => "2026-09-08T15:00:00.000Z",
+    fetchImpl: async () => { throw new Error("offline"); }
+  });
+  const result = await offline.context({ course: "DEM101", term: "2026-2" });
+  assert.equal(result.state, "available");
+  assert.equal(result.source.verification, "repository_curated");
+});
+
+test("bundled curated calendar keeps the current term available before the first successful download", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "pucp-calendar-bundled-"));
+  const bundledRegistryPath = path.resolve("config/academic-calendars.json");
+  const store = calendar.createAcademicCalendarStore({
+    filePath: path.join(dir, "local.json"),
+    registryCachePath: path.join(dir, "registry-cache.json"),
+    bundledRegistryPath,
+    registryUrl: "https://raw.githubusercontent.com/Hellowda253/KIT-PUCP-MCP/main/config/academic-calendars.json",
+    now: () => "2026-09-07T15:00:00.000Z",
+    fetchImpl: async () => { throw new Error("offline"); }
+  });
+  const result = await store.context({ course: "IND270", term: "2026-2" });
+  assert.equal(result.state, "available");
+  assert.equal(result.calendarId, "pucp-regular-2026-2");
+  assert.equal(result.currentDate, "2026-09-07");
+  assert.equal(result.currentWeek, 4);
+});
+
+test("curated repository calendar takes precedence over a local record with the same id", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "pucp-calendar-override-"));
+  const store = calendar.createAcademicCalendarStore({
+    filePath: path.join(dir, "local.json"),
+    registryCachePath: path.join(dir, "registry-cache.json"),
+    bundledRegistryPath: null,
+    registryUrl: "https://raw.githubusercontent.com/Hellowda253/KIT-PUCP-MCP/main/config/academic-calendars.json",
+    now: () => "2026-09-07T15:00:00.000Z",
+    fetchImpl: async () => ({ ok: true, async json() { return {
+      schemaVersion: 1,
+      updatedAt: "2026-09-06T12:00:00.000Z",
+      calendars: [{ ...record, id: "same", courseKeys: ["*"], startDate: "2026-08-17" }]
+    }; } })
+  });
+  await store.save({ calendar: { ...record, id: "same", courseKeys: ["*"], startDate: "2026-08-24" } });
+  const result = await store.context({ course: "DEM101", term: "2026-2" });
+  assert.equal(result.startDate, "2026-08-17");
+  assert.equal(result.source.verification, "repository_curated");
+});
+
+test("equivalent pregrado calendars are deduplicated and term alone resolves the curated record", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "pucp-calendar-equivalent-"));
+  const store = calendar.createAcademicCalendarStore({
+    filePath: path.join(dir, "local.json"),
+    registryCachePath: path.join(dir, "registry-cache.json"),
+    bundledRegistryPath: null,
+    registryUrl: "https://raw.githubusercontent.com/Hellowda253/KIT-PUCP-MCP/main/config/academic-calendars.json",
+    now: () => "2026-09-07T15:00:00.000Z",
+    fetchImpl: async () => ({ ok: true, async json() { return {
+      schemaVersion: 1,
+      updatedAt: "2026-09-06T12:00:00.000Z",
+      calendars: [{
+        ...record,
+        id: "pucp-regular-2026-2",
+        program: "Pregrado PUCP",
+        courseKeys: ["*"]
+      }]
+    }; } })
+  });
+  await store.save({ calendar: {
+    ...record,
+    id: "pucp_pregrado_2026_2",
+    program: "pregrado",
+    courseKeys: ["*"]
+  } });
+
+  const byCourse = await store.context({ course: "1IND52", term: "2026-2" });
+  const byTerm = await store.list({ term: "2026-2" });
+
+  assert.equal(byCourse.state, "available");
+  assert.equal(byCourse.calendarId, "pucp-regular-2026-2");
+  assert.equal(byCourse.currentWeek, 4);
+  assert.equal(byCourse.source.verification, "repository_curated");
+  assert.equal(byTerm.state, "available");
+  assert.equal(byTerm.calendars.length, 1);
+});
 
 test("calendar context uses the live Lima date, never snapshot timestamps", async (t) => {
   const s = await setup(t);
@@ -67,8 +206,9 @@ test("unknown programs, new terms and competing calendars never inherit a guesse
   const missing = await store.context({ course: "DEM101" });
   assert.equal(missing.state, "calendar_unavailable");
   assert.equal(missing.calendarRegistration.required, true);
-  assert.equal(missing.calendarRegistration.action, "register_verified_calendar");
-  assert.equal(missing.calendarRegistration.tool, "set_academic_calendar");
+  assert.equal(missing.calendarRegistration.action, "refresh_curated_calendar_registry");
+  assert.equal(missing.calendarRegistration.tool, "get_academic_calendar");
+  assert.equal(missing.calendarRegistration.fallbackTool, "set_academic_calendar");
   assert.match(missing.calendarRegistration.officialSourceHint, /^https:\/\/estudiante\.pucp\.edu\.pe\//u);
   await store.save({ calendar: record });
   assert.equal((await store.context({ course: "OTHER101" })).currentWeek, null);
@@ -98,8 +238,8 @@ test("weeks above 19 require verifying the active term instead of exposing a sta
   assert.equal(result.calculatedCurrentWeek, 20);
   assert.equal(result.calendarRegistration.required, true);
   assert.equal(result.calendarRegistration.reason, "week_exceeds_19");
-  assert.equal(result.calendarRegistration.action, "verify_active_term_and_update_calendar");
-  assert.equal(result.calendarRegistration.tool, "set_academic_calendar");
+  assert.equal(result.calendarRegistration.action, "refresh_curated_calendar_registry");
+  assert.equal(result.calendarRegistration.tool, "get_academic_calendar");
 });
 
 test("validation rejects invalid dates, overlapping weeks and private source URLs atomically", async (t) => {

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-09-07T00:00:00.000-05:00",
+  "calendars": [
+    {
+      "id": "pucp-regular-2026-2",
+      "term": "2026-2",
+      "program": "Pregrado PUCP",
+      "kind": "regular",
+      "startDate": "2026-08-17",
+      "endDate": "2026-12-12",
+      "courseKeys": [
+        "*"
+      ],
+      "source": {
+        "url": "https://estudios-generales-letras.pucp.edu.pe/informacion-para-estudiantes/semestre-academico/calendario-academico/",
+        "title": "Calendario académico PUCP 2026-2",
+        "evidence": "Inicio de clases: 17 de agosto de 2026. Fin del semestre y exámenes rezagados: 12 de diciembre de 2026."
+      }
+    }
+  ]
+}

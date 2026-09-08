@@ -4,7 +4,7 @@ Usa el servidor `campus_virtual_pucp`. Si una consulta devuelve `pending`, sigue
 
 ## Consultas personales
 
-- Horario propio semanal: `get_student_schedule`, fuente del botón autenticado **Horario**. Prefiérelo sobre búsquedas de oferta cuando el estudiante pida su horario habitual, pero no lo uses para afirmar que una sesión ocurre en una fecha concreta.
+- Horario propio semanal: `get_student_schedule`, fuente del botón autenticado **Horario**. Prefiérelo sobre búsquedas de oferta cuando el estudiante pida su horario habitual. Si devuelve `answerReady: false`, espera el job indicado y repite la consulta antes de entregar docentes, aulas, prácticas o exámenes. No lo uses para afirmar que una sesión ocurre en una fecha concreta.
 - Agenda: usa `get_campus_day` para una fecha y `get_campus_agenda` para un rango. Para “hoy” o una fecha concreta prevalece la agenda; para “próxima clase”, consulta `get_campus_agenda` con un rango suficiente hasta hallar el siguiente evento. Un día vacío significa que no hay un evento confirmado allí: amplía el rango, no lo reemplaces con el horario semanal.
 - Cursos matriculados: `list_enrolled_courses`.
 - Compañeros de un curso visible: `list_course_participants`. Usa la clave del curso; filtra por horario si el usuario pide su sección. Los correos se omiten por defecto y `includeEmail: true` se usa solo cuando el usuario los necesita expresamente. No envíes correos ni uses los formularios del padrón.

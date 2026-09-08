@@ -4,6 +4,7 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  createReusableSessionManager,
   readJsonCache,
   resolveCourse,
   writeJsonAtomic
@@ -34,6 +35,7 @@ import { searchableText } from "./text.js";
 import { createPaideiaUrlPolicy } from "./url-policy.js";
 
 const manifestLocks = new Map();
+const defaultPlaywrightLoader = () => import("playwright");
 
 function paideiaError(code, message) {
   const error = new Error(message);
@@ -108,11 +110,67 @@ export async function waitForPaideiaLanding(
 
 export function createLivePaideiaAdapter({
   configLoader = loadPaideiaConfig,
-  playwrightLoader = () => import("playwright"),
+  playwrightLoader = defaultPlaywrightLoader,
+  reuseSessions = playwrightLoader === defaultPlaywrightLoader,
   epochNow = () => Date.now(),
   continuingCooldownMs = 30 * 60 * 1000
 } = {}) {
   const areaCooldowns = new Map();
+  const sessionManager = createReusableSessionManager({
+    create: async ({ config, policy }) => {
+      const { chromium } = await playwrightLoader();
+      const launchOptions = {
+        headless: true,
+        args: ["--disable-dev-shm-usage", "--disable-gpu"]
+      };
+      if (config.chromePath && existsSync(config.chromePath)) {
+        launchOptions.executablePath = config.chromePath;
+      }
+      const browser = await chromium.launch(launchOptions);
+      let context;
+      let page;
+      try {
+        context = await browser.newContext({
+          viewport: { width: 1366, height: 1000 },
+          acceptDownloads: true
+        });
+        if (typeof context.route === "function") {
+          await context.route("**/*", (route) => {
+            try {
+              policy.assertOrigin(route.request().url());
+            } catch {
+              return route.abort();
+            }
+            return ["image", "media", "font"].includes(route.request().resourceType())
+              ? route.abort()
+              : route.continue();
+          });
+        }
+        page = await context.newPage();
+        return {
+          browser, context, page, config, policy,
+          async close() {
+            await page?.close().catch(() => {});
+            await context?.close().catch(() => {});
+            await browser?.close().catch(() => {});
+          }
+        };
+      } catch (error) {
+        await page?.close().catch(() => {});
+        await context?.close().catch(() => {});
+        await browser.close().catch(() => {});
+        throw error;
+      }
+    },
+    authenticate: ({ page, config, policy }) => openAuthenticatedDashboard(
+      page,
+      `${config.baseUrl}/my/courses.php`,
+      config,
+      policy
+    ),
+    isAuthenticationError: (error) => ["authentication_required", "session_expired"]
+      .includes(String(error?.code ?? "").toLowerCase())
+  });
 
   async function loadTimelineCatalog(page, area, policy) {
     const method = "core_course_get_enrolled_courses_by_timeline_classification";
@@ -176,7 +234,7 @@ export function createLivePaideiaAdapter({
     const classifications = course.timelineClassifications ?? [];
     return classifications.length === 0 || classifications.includes("inprogress");
   }
-  async function withSession(task, { acceptDownloads = false } = {}) {
+  async function withSession(task, { acceptDownloads = false, idempotent = true } = {}) {
     const config = await configLoader();
     if (!config.user || !config.pass) {
       throw paideiaError(
@@ -189,6 +247,13 @@ export function createLivePaideiaAdapter({
       readOrigins: [config.continuingBaseUrl],
       authHosts: config.authHosts
     });
+    if (reuseSessions) {
+      return sessionManager.run({
+        key: `${config.baseUrl}|${config.continuingBaseUrl}|${config.user}`,
+        descriptor: { config, policy },
+        idempotent
+      }, ({ browser, context, page }) => task({ browser, context, page, config, policy }));
+    }
     let browser;
     let context;
     let page;
@@ -255,6 +320,7 @@ export function createLivePaideiaAdapter({
     config,
     policy
   ) {
+    const requestedOrigin = new URL(dashboardUrl).origin;
     policy.assertNavigation(dashboardUrl);
     const dashboardResponse = await page.goto(dashboardUrl, {
       waitUntil: "domcontentloaded",
@@ -293,10 +359,36 @@ export function createLivePaideiaAdapter({
       await waitForPaideiaLanding(page);
       policy.assertNavigation(page.url(), { allowAuth: true });
     }
+    if (!loginVisible && new URL(page.url()).origin !== new URL(dashboardUrl).origin) {
+      // An already authenticated Pandora session can redirect automatically
+      // without rendering the credential form. Wait for that passive SSO hop
+      // before deciding that the optional Moodle area is unavailable.
+      await waitForPaideiaLanding(page);
+      policy.assertNavigation(page.url(), { allowAuth: true });
+    }
+    if (new URL(page.url()).origin !== requestedOrigin) {
+      // SSO can finish on the primary Moodle area instead of honoring the
+      // requested Education Continua relay target. Reopen the exact dashboard
+      // once with the established session so its catalog is never confused
+      // with the primary area.
+      const retryResponse = await page.goto(dashboardUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 45_000
+      });
+      assertNavigationChain(retryResponse, policy, { allowAuth: true });
+      await waitForPaideiaLanding(page);
+      policy.assertNavigation(page.url(), { allowAuth: true });
+    }
     if ((await page.locator("#username").count()) > 0) {
       throw paideiaError(
         "authentication_required",
         "Paideia authentication did not complete"
+      );
+    }
+    if (new URL(page.url()).origin !== requestedOrigin) {
+      throw paideiaError(
+        "session_expired",
+        "Paideia did not open the requested course area"
       );
     }
     policy.assertNavigation(page.url());
@@ -398,7 +490,9 @@ export function createLivePaideiaAdapter({
                 policy
               );
               areaCooldowns.delete(area.id);
-              return loadTimelineCatalog(areaPage, area, policy);
+              // Await inside the try so the finally block cannot close the
+              // area page while its timeline AJAX request is still running.
+              return await loadTimelineCatalog(areaPage, area, policy);
             } catch (error) {
               areaCooldowns.set(area.id, epochNow() + continuingCooldownMs);
               throw error;
@@ -978,7 +1072,7 @@ export function createLivePaideiaAdapter({
             skipped: results.filter((item) => item.status === "skipped")
           };
         }),
-      { acceptDownloads: true }
+      { acceptDownloads: true, idempotent: false }
     );
   }
 
@@ -1020,7 +1114,7 @@ export function createLivePaideiaAdapter({
             skipped
           };
         }),
-      { acceptDownloads: true }
+      { acceptDownloads: true, idempotent: false }
     );
   }
 
@@ -1035,5 +1129,13 @@ export function createLivePaideiaAdapter({
       }
     });
   }
-  return { sync, getActivityDetails, getFolderContents, downloadResource, downloadCourseMaterials };
+  return {
+    sync,
+    getActivityDetails,
+    getFolderContents,
+    downloadResource,
+    downloadCourseMaterials,
+    close: () => sessionManager.close(),
+    getSessionMetrics: () => sessionManager.metrics()
+  };
 }

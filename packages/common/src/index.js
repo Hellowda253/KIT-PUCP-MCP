@@ -20,3 +20,4 @@ export {
   createStdioMcpServer
 } from "./stdio-server.js";
 export { resolveCourse } from './course-resolver.js';
+export { createReusableSessionManager } from "./session-manager.js";

@@ -1,6 +1,6 @@
 {
   "name": "get_paideia_folder_contents",
-  "description": "Queue a live, read-only inspection of one Moodle folder and return its visible nested files through get_paideia_job_status. Does not download files. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true on first use or after week 19, inspect the official PUCP page, call set_academic_calendar, and retry before making a week-dependent claim.",
+  "description": "Queue a live, read-only inspection of one Moodle folder and return its visible nested files through get_paideia_job_status. Does not download files. Includes live-clock academicContext from the curated KIT PUCP calendar registry. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true, refresh the registry with get_academic_calendar and report a missing term honestly; use set_academic_calendar only as a temporary local fallback.",
   "parameters": {
     "type": "object",
     "properties": {

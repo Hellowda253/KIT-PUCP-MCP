@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Deduplica calendarios equivalentes, normaliza los nombres de programa y da precedencia al registro curado frente a respaldos locales.
+- Devuelve `statistics_not_published` para notas finales aún no publicadas sin iniciar un trabajo de scraping innecesario.
+- Compara cambios de agenda únicamente dentro del rango temporal compartido, registra el alcance usado y neutraliza diffs antiguos cuyo rango se desconoce.
+- Reutiliza una sola sesión autenticada de navegador durante la vida de cada servidor y renueva solo lecturas idempotentes cuando la sesión expira.
+- Enriquece el horario personal con una búsqueda agrupada y reintentos individuales únicamente para cursos omitidos, sin sustituir la fuente autoritativa del alumno.
+- Descarga un registro JSON curado de calendarios actuales y próximos desde el repositorio, con caché persistente, copia incluida y respaldo local opcional.
+- Documenta una línea base de tres sincronizaciones reales de Paideia y conserva la concurrencia actual al no existir una etapa que domine por sí sola el tiempo total.
+- Evita cerrar la pestaña de Educación Continua mientras su catálogo AJAX sigue cargando y vuelve a abrir el área exacta cuando el SSO termina en Pregrado/Posgrado.
+- Evita sondeos lentos del portal de inscripción después de las fechas publicadas y usa la semana académica verificada como respaldo cuando el calendario de matrícula no está disponible.
+- Añade `forceProbe` a `get_registration_status` para reaperturas excepcionales y mantiene el catálogo de horarios y el horario matriculado como alternativas inmediatas.
+
 ## 0.3.1 - 2026-09-06
 
 - Agrupa clase, práctica, laboratorio y examen como una sola opción antes de recomendar o validar horarios; los componentes incompletos ya no pueden aparecer como una combinación válida.

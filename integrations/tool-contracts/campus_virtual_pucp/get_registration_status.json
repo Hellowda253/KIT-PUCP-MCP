@@ -1,12 +1,16 @@
 {
   "name": "get_registration_status",
-  "description": "Read live registered or prematriculated courses, statuses, and personal relative positions from the active regular or structurally compatible extemporaneous view.",
+  "description": "Read registered or prematriculated courses, statuses, and personal relative positions from the active regular or structurally compatible extemporaneous view. Skips the live browser probe after the published enrollment window; use forceProbe only when the user confirms an exceptional reopening.",
   "parameters": {
     "type": "object",
     "properties": {
       "forceRefresh": {
         "type": "boolean",
         "description": "Queue a metadata-only refresh while returning the last good cache."
+      },
+      "forceProbe": {
+        "type": "boolean",
+        "description": "Bypass the enrollment/calendar guard and perform one live portal probe. Use only for a confirmed exceptional reopening."
       }
     },
     "required": [],

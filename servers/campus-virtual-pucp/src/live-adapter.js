@@ -18,6 +18,7 @@ import {
   parsePortalModules
 } from "./parsers.js";
 import { createCampusUrlPolicy } from "./url-policy.js";
+import { createReusableSessionManager } from "./session-manager.js";
 import { cleanText, searchableText } from "./text.js";
 import { createHash } from "node:crypto";
 
@@ -1276,31 +1277,46 @@ async function mapLimit(items, limit, operation) {
 export function createLiveCampusAdapter({
   loadConfig = loadCampusConfig,
   createSession = createPlaywrightSession,
+  reuseSessions = createSession === createPlaywrightSession,
   now = () => new Date().toISOString()
 } = {}) {
+  const authenticatedSessions = createReusableSessionManager({
+    create: ({ config, policy }) => createSession({ config, policy }),
+    authenticate: (session, { config, policy, entryUrl }) => session.authenticate({
+      user: config.user,
+      pass: config.pass,
+      entryUrl,
+      policy
+    }),
+    isAuthenticationError: (error) => ["authentication_required", "session_expired"]
+      .includes(String(error?.code ?? "").toLowerCase())
+  });
+  const publicSessions = createReusableSessionManager({
+    create: ({ config, policy }) => createSession({ config, policy })
+  });
+
   async function withSession(operation, { entryUrl } = {}) {
     const config = await loadConfig();
     const policy = createCampusUrlPolicy(config);
-    const session = await createSession({ config, policy });
-    try {
-      const authenticatedUrl = await session.authenticate({
-        user: config.user,
-        pass: config.pass,
-        entryUrl:
-          typeof entryUrl === "function"
-            ? entryUrl(config)
-            : entryUrl || config.agendaEntryUrl,
-        policy
-      });
-      return await operation({
-        config,
-        policy,
-        session,
-        authenticatedUrl
-      });
-    } finally {
-      await session.close().catch(() => {});
+    const resolvedEntryUrl = typeof entryUrl === "function"
+      ? entryUrl(config)
+      : entryUrl || config.agendaEntryUrl;
+    if (!reuseSessions) {
+      const session = await createSession({ config, policy });
+      try {
+        const authenticatedUrl = await session.authenticate({
+          user: config.user, pass: config.pass, entryUrl: resolvedEntryUrl, policy
+        });
+        return await operation({ config, policy, session, authenticatedUrl });
+      } finally {
+        await session.close().catch(() => {});
+      }
     }
+    return authenticatedSessions.run({
+      key: `${config.portalUrl}|${config.user}`,
+      descriptor: { config, policy, entryUrl: resolvedEntryUrl },
+      idempotent: true
+    }, (session) => operation({ config, policy, session, authenticatedUrl: resolvedEntryUrl }));
   }
 
   async function sync(options = {}) {
@@ -1976,12 +1992,19 @@ export function createLiveCampusAdapter({
   async function withPublicSession(operation) {
     const config = await loadConfig();
     const policy = createCampusUrlPolicy(config);
-    const session = await createSession({ config, policy });
-    try {
-      return await operation({ config, policy, session });
-    } finally {
-      await session.close().catch(() => {});
+    if (!reuseSessions) {
+      const session = await createSession({ config, policy });
+      try {
+        return await operation({ config, policy, session });
+      } finally {
+        await session.close().catch(() => {});
+      }
     }
+    return publicSessions.run({
+      key: `${config.portalUrl}|public`,
+      descriptor: { config, policy },
+      idempotent: true
+    }, (session) => operation({ config, policy, session }));
   }
 
   function registrationEntryUrl(config) {
@@ -2234,7 +2257,9 @@ export function createLiveCampusAdapter({
         "A confirmed one-use token and an exact prepared registration change are required"
       );
     }
-    return withSession(async ({ session }) => {
+    const config = await loadConfig();
+    const policy = createCampusUrlPolicy(config);
+    const execute = async (session) => {
       if (typeof session.commitRegistrationChange !== "function") {
         throw adapterError("scrape_failed", "Campus registration writer is unavailable");
       }
@@ -2244,7 +2269,16 @@ export function createLiveCampusAdapter({
         removeRefs: [...(options.removeRefs ?? [])],
         addCourseCodes: [...(options.addCourseCodes ?? [])]
       });
-    }, { entryUrl: registrationEntryUrl });
+    };
+    if (!reuseSessions) {
+      return withSession(({ session }) => execute(session), { entryUrl: registrationEntryUrl });
+    }
+    const entryUrl = registrationEntryUrl(config);
+    return authenticatedSessions.run({
+      key: `${config.portalUrl}|${config.user}`,
+      descriptor: { config, policy, entryUrl },
+      idempotent: false
+    }, execute);
   }
 
   async function getAllowedCourses(options = {}) {
@@ -2321,6 +2355,15 @@ export function createLiveCampusAdapter({
     searchHistoricalCourseSchedules,
     commitCourseRegistration,
     searchScheduleCatalog,
-    sync
+    sync,
+    close: async () => {
+      await Promise.allSettled([authenticatedSessions.close(), publicSessions.close()]);
+    },
+    getSessionMetrics: () => ({
+      authenticated: authenticatedSessions.metrics(),
+      public: publicSessions.metrics(),
+      browserCreated: authenticatedSessions.metrics().browserCreated + publicSessions.metrics().browserCreated,
+      sessionReused: authenticatedSessions.metrics().sessionReused + publicSessions.metrics().sessionReused
+    })
   };
 }

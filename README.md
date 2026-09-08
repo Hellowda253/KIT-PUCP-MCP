@@ -6,7 +6,10 @@ y un resumen académico combinado para asistentes compatibles con MCP.
 
 Versión estable actual: **0.3.1**. Consulta el [historial de cambios](CHANGELOG.md).
 
-Incluye [contexto de semana académica](docs/academic-calendar.md): en la primera consulta pertinente el agente registra el calendario del programa desde una fuente oficial, calcula con el reloj actual y vuelve a verificar el ciclo antes de aceptar una semana mayor que 19. Admite verano e intensivos sin extrapolar el calendario regular.
+Incluye [contexto de semana académica](docs/academic-calendar.md): descarga del
+repositorio un registro JSON curado con los ciclos actuales y próximos, calcula
+con el reloj actual y vuelve a verificar el ciclo antes de aceptar una semana
+mayor que 19. Admite verano e intensivos mediante calendarios independientes.
 
 > Proyecto comunitario no oficial. No está afiliado, respaldado ni operado por
 > la PUCP. Cada estudiante ejecuta el servidor en su propio equipo y usa sus

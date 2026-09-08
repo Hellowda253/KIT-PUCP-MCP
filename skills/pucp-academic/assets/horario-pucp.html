@@ -155,6 +155,16 @@
       border: 1px solid var(--border-subtle);
     }
 
+    .btn-action.btn-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      padding: 6px;
+    }
+
+    .btn-icon svg { width: 17px; height: 17px; }
+
     .btn-action:hover { background: var(--bg-page); }
 
     .segment-control {
@@ -440,6 +450,13 @@
       <div class="controls-group" aria-label="Acciones del horario">
         <button class="btn-action" id="theme-toggle" type="button" aria-pressed="false">Tema oscuro</button>
         <button class="btn-action" id="print-button" type="button">Guardar como PDF</button>
+        <button class="btn-action btn-icon" id="download-html-button" type="button" aria-label="Descargar horario en HTML" title="Descargar horario en HTML">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M12 3v12"></path>
+            <path d="m7 10 5 5 5-5"></path>
+            <path d="M5 21h14"></path>
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -747,6 +764,19 @@
         event.currentTarget.setAttribute("aria-pressed", String(dark));
       });
       document.getElementById("print-button").addEventListener("click", () => window.print());
+      document.getElementById("download-html-button").addEventListener("click", () => {
+        const safeTerm = String(data.term || "horario").replace(/[^0-9A-Za-z-]+/g, "-");
+        const html = `<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
+        const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = `Horario_PUCP_${safeTerm}.html`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+      });
 
       renderHeader();
       renderDesktop();

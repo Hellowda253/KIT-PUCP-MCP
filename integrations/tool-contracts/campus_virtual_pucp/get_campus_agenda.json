@@ -1,6 +1,6 @@
 {
   "name": "get_campus_agenda",
-  "description": "Query confirmed Campus agenda events by inclusive date range, course, or comma-separated kinds. Use this for the next class or dated events; if one day is empty, widen the range instead of substituting the recurring weekly schedule. Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true on first use or after week 19, inspect the official PUCP page, call set_academic_calendar, and retry before making a week-dependent claim.",
+  "description": "Query confirmed Campus agenda events by inclusive date range, course, or comma-separated kinds. Use this for the next class or dated events; if one day is empty, widen the range instead of substituting the recurring weekly schedule. Includes live-clock academicContext from the curated KIT PUCP calendar registry. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true, refresh the registry with get_academic_calendar and report a missing term honestly; use set_academic_calendar only as a temporary local fallback.",
   "parameters": {
     "type": "object",
     "properties": {

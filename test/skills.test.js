@@ -154,17 +154,17 @@ test("academic material inspection routes by resource type without contradictory
   assert.match(combined, /sobrescrib.*confirmaci[oó]n/iu);
 });
 
-test("academic calendar bootstrap is mandatory on first use and stale cycles are reverified", async () => {
+test("academic calendar registry initializes first use and stale cycles request a refresh", async () => {
   const calendar = await read("skills/pucp-academic/references/academic-calendar.md");
   const campus = await read("skills/pucp-academic/references/campus-virtual.md");
   const tools = await read("packages/common/src/academic-calendar.js");
 
   assert.match(calendar, /primera consulta|primer uso/iu);
-  assert.match(calendar, /antes de responder.*semana|no.*respond.*semana.*hasta/isu);
-  assert.match(calendar, /p[aá]gina oficial.*evidencia|evidencia.*p[aá]gina oficial/isu);
-  assert.match(calendar, /JSON.*no.*PDF|PDF.*evidencia.*JSON/isu);
-  assert.match(calendar, /mayor (?:que|a) 19.*verific/isu);
-  assert.match(calendar, /ciclo (?:vigente|activo).*`set_academic_calendar`|`set_academic_calendar`.*ciclo (?:vigente|activo)/isu);
+  assert.match(calendar, /descarga autom[aá]ticamente.*academic-calendars\.json/isu);
+  assert.match(calendar, /fuente oficial.*`set_academic_calendar`|`set_academic_calendar`.*fuente oficial/isu);
+  assert.match(calendar, /registro operativo compartido.*JSON/isu);
+  assert.match(calendar, /mayor (?:que|a) 19.*refresca/isu);
+  assert.match(calendar, /respaldo local.*`set_academic_calendar`|`set_academic_calendar`.*respaldo local/isu);
   assert.match(calendar, /`courseKeys:\s*\["\*"\]`/u);
   assert.match(campus, /calendarRegistration/iu);
   assert.match(tools, /calendarRegistration/u);

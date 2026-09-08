@@ -9,7 +9,7 @@ Para el horario ya matriculado del estudiante usa `get_student_schedule`, no una
 ## Consultar y recomendar
 
 - Consulta elegibilidad, turno, fechas e impedimentos con `get_enrollment_eligibility`.
-- Consulta selección y `Posic. Relat.` con `get_registration_status`.
+- Consulta selección y `Posic. Relat.` con `get_registration_status`. Fuera de las fechas publicadas de matrícula, el MCP evita abrir el portal y responde de inmediato con alternativas. Usa `forceProbe: true` solo si el usuario confirma que la PUCP abrió una ventana excepcional en ese momento.
 - Usa `list_allowed_courses` para permisos y `list_cross_unit_vacancies` para cupos de otras unidades; un cupo no equivale a permiso.
 - Busca por códigos o `academicScope`. Obtén facultades y especialidades de los selectores reales; no supongas Ingeniería Industrial ni filtres por el prefijo del curso.
 - Un nivel requiere la especialidad completa. En el consultor compartido/público respeta sus separadores: un nivel explícito positivo identifica los cursos obligatorios de ese nivel y **Cursos Electivos** corresponde al nivel `0`. El código de horario (`0721`, `0821`, etc.) no indica el nivel ni la obligatoriedad. Si el resultado no trae `curriculumLevel` o `curriculumGroup`, informa clasificación desconocida y no la deduzcas del código.

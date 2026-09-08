@@ -271,6 +271,170 @@ test("sync visits both Paideia areas with the same browser context", async () =>
   ]);
 });
 
+test("Educación Continua waits for a passive SSO redirect before reading an empty catalog", async () => {
+  const primaryUrl = "https://paideiacursos.pucp.edu.pe/my/courses.php";
+  const continuingUrl = "https://paideiaprogramas.pucp.edu.pe/my/courses.php";
+  let pageNumber = 0;
+  const continuingVisits = [];
+  const makePage = () => {
+    const ownNumber = pageNumber++;
+    let currentUrl = "about:blank";
+    let closed = false;
+    return {
+      async goto(url) {
+        if (ownNumber === 1 && url === continuingUrl) {
+          continuingVisits.push(url);
+          currentUrl = continuingVisits.length === 1
+            ? "https://pandora.pucp.edu.pe/pucp/idp/profile/SAML2/Callback"
+            : continuingUrl;
+        } else {
+          currentUrl = url;
+        }
+      },
+      url() { return currentUrl; },
+      async evaluate() {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        if (closed) throw new Error("page closed before timeline response");
+        return [
+          { classification: "inprogress", courses: [] },
+          { classification: "future", courses: [] },
+          { classification: "past", courses: [] }
+        ];
+      },
+      locator(selector) {
+        if (selector === "#username") return { async count() { return 0; } };
+        return {
+          first() { return this; },
+          async waitFor() {
+            if (currentUrl.includes("pandora.pucp.edu.pe")) currentUrl = primaryUrl;
+          }
+        };
+      },
+      async content() {
+        if (closed) throw new Error("page closed before fallback content");
+        return '<body id="page-my-courses"><div data-region="course-content"></div></body>';
+      },
+      async close() { closed = true; }
+    };
+  };
+  const adapter = createLivePaideiaAdapter({
+    configLoader: async () => ({
+      user: "fixture-user",
+      pass: "fixture-pass",
+      baseUrl: "https://paideiacursos.pucp.edu.pe",
+      continuingBaseUrl: "https://paideiaprogramas.pucp.edu.pe",
+      authHosts: ["pandora.pucp.edu.pe"],
+      chromePath: ""
+    }),
+    playwrightLoader: async () => ({
+      chromium: {
+        async launch() {
+          return {
+            async newContext() {
+              return { async newPage() { return makePage(); }, async close() {} };
+            },
+            async close() {}
+          };
+        }
+      }
+    })
+  });
+
+  const result = await adapter.sync({ components: ["catalog"] });
+
+  assert.deepEqual(result.areaStates, [
+    { area: "pregrado_posgrado", state: "available", courseCount: 0 },
+    { area: "educacion_continua", state: "available", courseCount: 0 }
+  ]);
+  assert.deepEqual(continuingVisits, [continuingUrl, continuingUrl]);
+});
+
+test("Paideia reuses one authenticated browser session across consecutive reads", async () => {
+  let launches = 0;
+  let dashboardVisits = 0;
+  let browserCloses = 0;
+  let contextCloses = 0;
+  const makePage = () => {
+    let currentUrl = "about:blank";
+    return {
+      async goto(url) {
+        currentUrl = url;
+        if (url.endsWith("/my/courses.php")) dashboardVisits += 1;
+      },
+      url() { return currentUrl; },
+      locator() { return { async count() { return 0; } }; },
+      async content() { return '<body id="page-my-courses"><div data-region="course-content"></div></body>'; },
+      async close() {}
+    };
+  };
+  const adapter = createLivePaideiaAdapter({
+    reuseSessions: true,
+    configLoader: async () => ({
+      user: "fixture-user",
+      pass: "fixture-pass",
+      baseUrl: "https://paideiacursos.pucp.edu.pe",
+      continuingBaseUrl: "",
+      authHosts: ["pandora.pucp.edu.pe"],
+      chromePath: ""
+    }),
+    playwrightLoader: async () => ({
+      chromium: {
+        async launch() {
+          launches += 1;
+          return {
+            async newContext() {
+              return {
+                async route() {},
+                async newPage() { return makePage(); },
+                async close() { contextCloses += 1; }
+              };
+            },
+            async close() { browserCloses += 1; }
+          };
+        }
+      }
+    })
+  });
+
+  await adapter.sync({ components: ["catalog"] });
+  await adapter.sync({ components: ["catalog"] });
+  assert.equal(launches, 1);
+  assert.equal(dashboardVisits, 1);
+  assert.equal(adapter.getSessionMetrics().sessionReused, 1);
+  assert.deepEqual({ browserCloses, contextCloses }, { browserCloses: 0, contextCloses: 0 });
+  await adapter.close();
+  assert.deepEqual({ browserCloses, contextCloses }, { browserCloses: 1, contextCloses: 1 });
+});
+
+test("full Paideia synchronization reports one timing for every existing stage", async () => {
+  const makePage = () => {
+    let currentUrl = "about:blank";
+    return {
+      async goto(url) { currentUrl = url; },
+      url() { return currentUrl; },
+      locator() { return { async count() { return 0; } }; },
+      async content() { return '<body id="page-my-courses"><div data-region="course-content"></div></body>'; },
+      async close() {}
+    };
+  };
+  const adapter = createLivePaideiaAdapter({
+    configLoader: async () => ({
+      user: "fixture-user", pass: "fixture-pass",
+      baseUrl: "https://paideiacursos.pucp.edu.pe", continuingBaseUrl: "",
+      authHosts: ["pandora.pucp.edu.pe"], chromePath: ""
+    }),
+    playwrightLoader: async () => ({ chromium: { async launch() { return {
+      async newContext() { return { async newPage() { return makePage(); }, async close() {} }; },
+      async close() {}
+    }; } } })
+  });
+  const result = await adapter.sync();
+  for (const key of ["catalogMs", "courseContentMs", "activityDetailsMs", "announcementsMs", "gradesMs", "totalMs"]) {
+    assert.equal(Number.isInteger(result.timings[key]), true, key);
+    assert.equal(result.timings[key] >= 0, true, key);
+  }
+});
+
 test("catalog synchronization obtains current and past courses from Moodle timeline AJAX", async () => {
   const classifications = [];
   const makePage = () => {
@@ -508,8 +672,9 @@ test("temporarily unavailable Educación Continua is not retried on every sync",
 
   const first = await adapter.sync({ components: ["catalog"] });
   const second = await adapter.sync({ components: ["catalog"] });
+  await adapter.sync({ components: ["catalog"], retryUnavailableAreas: true });
 
-  assert.equal(visits.filter((url) => url.includes("paideiaprogramas")).length, 1);
+  assert.equal(visits.filter((url) => url.includes("paideiaprogramas")).length, 2);
   assert.equal(first.areaStates[1].state, "unavailable");
   assert.equal(second.areaStates[1].reason, "cooldown");
 });

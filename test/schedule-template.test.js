@@ -40,6 +40,18 @@ test("PUCP Academic bundles one UTF-8 responsive and printable schedule template
   assert.ok(scripts.length > 0, "template must contain its standalone renderer");
   for (const script of scripts) new Function(script);
 });
+
+test("schedule template offers an icon-only HTML download after the PDF action", async () => {
+  const html = await readFile(templatePath, "utf8");
+
+  assert.match(html, /id="print-button"[\s\S]*id="download-html-button"/u);
+  assert.match(html, /id="download-html-button"[^>]*aria-label="Descargar horario en HTML"/u);
+  assert.match(html, /id="download-html-button"[\s\S]*<svg[^>]*aria-hidden="true"/u);
+  assert.doesNotMatch(html, /id="download-html-button"[^>]*>\s*Descargar/u);
+  assert.match(html, /new Blob\(\[html\],\s*\{\s*type:\s*"text\/html;charset=utf-8"\s*\}\)/u);
+  assert.match(html, /download\s*=\s*`Horario_PUCP_\$\{safeTerm\}\.html`/u);
+});
+
 test("schedule layout assigns horizontal lanes to every overlapping activity", async () => {
   assert.equal(await exists(layoutPath), true, "schedule layout module must exist");
   const { layoutDaySessions } = await import(pathToFileURL(layoutPath));
@@ -291,6 +303,30 @@ test("schedule display keeps official values and derives readable labels", async
   assert.equal(result.sessions[0].title, input.sessions[0].title, "official session title must remain unchanged");
   assert.equal(result.sessions[0].displayTitle, "Diseño de la Cadena de Suministros y Operaciones");
   assert.equal(result.sessions[0].displayInstructor, "Rojas Polo, J. E.");
+});
+
+test("exam cards derive their display title from the associated course", async () => {
+  const { prepareScheduleDisplayData } = await import(pathToFileURL(displayPath));
+  const input = {
+    term: "2026-2",
+    credits: 4,
+    courses: [{
+      code: "1IND52",
+      name: "DISEÑO DE LA CADENA DE SUMINISTROS Y OPERACIONES"
+    }],
+    sessions: [{
+      day: 3,
+      start: "08:00",
+      end: "11:00",
+      type: "exam",
+      courseCodes: ["1IND52"],
+      title: "Examen"
+    }]
+  };
+
+  const result = prepareScheduleDisplayData(input);
+  assert.equal(result.sessions[0].title, "Examen", "the original Campus value must be preserved");
+  assert.equal(result.sessions[0].displayTitle, "Diseño de la Cadena de Suministros y Operaciones");
 });
 
 test("schedule display compacts explicitly separated multiple instructors", async () => {

@@ -259,14 +259,20 @@ export function createCampusTools(service) {
     },
     {
       name: "get_student_schedule",
-      description: "Return the authenticated student's own recurring weekly pattern from the Campus Horario button, including classes, practices, laboratories, exams, rooms, and overlaps. It describes the usual timetable but does not confirm that a session occurs on a specific calendar date; use Campus agenda for today or the next class.",
+      description: "Return the authenticated student's authoritative recurring weekly pattern from the Campus Horario button and enrich missing professors, rooms, practices and exams with one grouped catalog query. If answerReady=false, wait for refreshJobId with get_campus_job_status and call this tool again before presenting a detailed final schedule. Never replace this personal schedule with the agenda or an offer search. A recurring pattern does not confirm an event on a specific calendar date; use Campus agenda for that.",
       inputSchema: schema(refresh),
       handler: (args) => service.getStudentSchedule(args)
     },
     {
       name: "get_registration_status",
-      description: "Read live registered or prematriculated courses, statuses, and personal relative positions from the active regular or structurally compatible extemporaneous view.",
-      inputSchema: schema(refresh),
+      description: "Read registered or prematriculated courses, statuses, and personal relative positions from the active regular or structurally compatible extemporaneous view. Skips the live browser probe after the published enrollment window; use forceProbe only when the user confirms an exceptional reopening.",
+      inputSchema: schema({
+        ...refresh,
+        forceProbe: {
+          type: "boolean",
+          description: "Bypass the enrollment/calendar guard and perform one live portal probe. Use only for a confirmed exceptional reopening."
+        }
+      }),
       handler: (args) => service.getRegistrationStatus(args)
     },
     {

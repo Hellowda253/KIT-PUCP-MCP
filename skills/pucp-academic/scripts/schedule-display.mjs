@@ -6,6 +6,7 @@ const SMALL_WORDS = new Set([
 function hasLetters(value) {
   return /\p{L}/u.test(value);
 }
+
 function isAllUppercase(value) {
   return hasLetters(value) && !/\p{Ll}/u.test(value);
 }
@@ -51,17 +52,37 @@ export function compactInstructor(value) {
   return people.map(compactPerson).join(" / ");
 }
 
+function normalizedCourseCode(value) {
+  return String(value ?? "").trim().toLocaleUpperCase("es-PE");
+}
+
+function sessionDisplayTitle(session, coursesByCode) {
+  if (session?.type !== "exam") return readableLabel(session?.title);
+  const courseNames = (Array.isArray(session.courseCodes) ? session.courseCodes : [])
+    .map((code) => coursesByCode.get(normalizedCourseCode(code))?.displayName)
+    .filter(Boolean);
+  return courseNames.length > 0
+    ? [...new Set(courseNames)].join(" / ")
+    : readableLabel(session?.title);
+}
+
 export function prepareScheduleDisplayData(data) {
+  const courses = Array.isArray(data?.courses) ? data.courses.map((course) => ({
+    ...course,
+    displayName: readableLabel(course.name),
+    displayInstructor: compactInstructor(course.instructor)
+  })) : [];
+  const coursesByCode = new Map(
+    courses
+      .map((course) => [normalizedCourseCode(course.code), course])
+      .filter(([code]) => Boolean(code))
+  );
   return {
     ...data,
-    courses: Array.isArray(data?.courses) ? data.courses.map((course) => ({
-      ...course,
-      displayName: readableLabel(course.name),
-      displayInstructor: compactInstructor(course.instructor)
-    })) : [],
+    courses,
     sessions: Array.isArray(data?.sessions) ? data.sessions.map((session) => ({
       ...session,
-      displayTitle: readableLabel(session.title),
+      displayTitle: sessionDisplayTitle(session, coursesByCode),
       displayInstructor: compactInstructor(session.instructor)
     })) : []
   };

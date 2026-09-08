@@ -212,6 +212,46 @@ test("live participant lookup uses the dedicated authenticated roster reader", a
   ]);
 });
 
+test("live Campus adapter reuses one authenticated session across consecutive reads", async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "campus-session-reuse-"));
+  let created = 0;
+  let authenticated = 0;
+  let closed = 0;
+  const adapter = createLiveCampusAdapter({
+    loadConfig: async () => config(temporary),
+    reuseSessions: true,
+    createSession: async () => {
+      created += 1;
+      return {
+        async authenticate() { authenticated += 1; return campusPortal; },
+        async queryCourseParticipants() {
+          return {
+            url: "https://eros.pucp.edu.pe/pucp/notas/nownotfi/nownotfi?accion=Abrir&vernotas=0&cicloano=2026&ciclo=02&tipociclo=00&clavecurso=IND270",
+            courseCode: "IND270",
+            courseName: "Procesos Industriales",
+            term: "2026-2",
+            html: "<table><tr><th></th><th>Alumno</th><th>Nombre</th><th>Horario</th><th>Especialidad</th><th>E-mail</th><th>Enviar Mail</th></tr></table>"
+          };
+        },
+        async close() { closed += 1; }
+      };
+    }
+  });
+
+  const input = {
+    course: "IND270",
+    metadataOnly: true,
+    allowDownloads: false,
+    allowMutations: false
+  };
+  await adapter.getCourseParticipants(input);
+  await adapter.getCourseParticipants(input);
+  assert.deepEqual({ created, authenticated, closed }, { created: 1, authenticated: 1, closed: 0 });
+  assert.equal(adapter.getSessionMetrics().sessionReused, 1);
+  await adapter.close();
+  assert.equal(closed, 1);
+});
+
 test("course-link discovery waits for the asynchronously rendered Campus list", async () => {
   assert.equal(typeof liveAdapter.readVisibleCourseLinks, "function");
   let rendered = false;

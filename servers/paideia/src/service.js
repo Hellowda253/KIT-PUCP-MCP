@@ -1113,6 +1113,10 @@ export function createPaideiaService({
     syncPaideia,
     async waitForIdle() {
       await Promise.all([...jobPromises]);
+    },
+    async close() {
+      await Promise.all([...jobPromises]);
+      await adapter.close?.();
     }
   };
 }

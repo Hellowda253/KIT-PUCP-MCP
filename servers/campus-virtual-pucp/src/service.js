@@ -18,6 +18,7 @@ import {
   mergeSchedulePreferences,
   recommendCourseSchedules as recommendSchedulesLocally
 } from "./schedule-optimizer.js";
+import { buildCourseOptions } from "./schedule-components.js";
 
 const SOURCE = "campus_virtual_pucp";
 const MODULE_KEYS = [
@@ -197,6 +198,105 @@ function summarizeModule(previous, current) {
   };
 }
 
+function agendaRange(entry) {
+  const start = String(entry?.range?.start ?? "");
+  const end = String(entry?.range?.end ?? "");
+  return /^\d{4}-\d{2}-\d{2}$/u.test(start) &&
+    /^\d{4}-\d{2}-\d{2}$/u.test(end) && start <= end
+    ? { start, end }
+    : null;
+}
+
+function agendaItemDate(item) {
+  const value = item?.beginDate ?? item?.date ?? item?.start ?? item?.at ?? "";
+  const date = String(value).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/u.test(date) ? date : null;
+}
+
+function emptyChange(scope) {
+  return {
+    changed: false,
+    addedCount: 0,
+    removedCount: 0,
+    changedCount: 0,
+    added: [],
+    removed: [],
+    updated: [],
+    scope
+  };
+}
+
+function summarizeAgenda(previous, current) {
+  const before = agendaRange(previous);
+  const after = agendaRange(current);
+  if (!before && !after) {
+    return {
+      ...summarizeModule(previous, current),
+      scope: { previous: null, current: null, compared: null, mode: "unscoped" }
+    };
+  }
+  if (!before || !after) {
+    return emptyChange({
+      previous: before,
+      current: after,
+      compared: null,
+      mode: "scope_unavailable"
+    });
+  }
+  const compared = {
+    start: before.start > after.start ? before.start : after.start,
+    end: before.end < after.end ? before.end : after.end
+  };
+  if (compared.start > compared.end) {
+    return emptyChange({
+      previous: before,
+      current: after,
+      compared: null,
+      mode: "disjoint"
+    });
+  }
+  const sameRange = before.start === after.start && before.end === after.end;
+  const withinComparedRange = (item) => {
+    const date = agendaItemDate(item);
+    return date && date >= compared.start && date <= compared.end;
+  };
+  const prior = sameRange
+    ? previous
+    : { ...previous, items: (previous?.items ?? []).filter(withinComparedRange) };
+  const next = sameRange
+    ? current
+    : { ...current, items: (current?.items ?? []).filter(withinComparedRange) };
+  return {
+    ...summarizeModule(prior, next),
+    scope: {
+      previous: before,
+      current: after,
+      compared,
+      mode: sameRange ? "same_range" : "intersection"
+    }
+  };
+}
+
+function normalizeHistoryEvent(event) {
+  const agenda = event?.modules?.agenda;
+  if (!agenda || agenda.scope) return event;
+  return {
+    ...event,
+    modules: {
+      ...event.modules,
+      agenda: {
+        ...emptyChange({
+          previous: null,
+          current: null,
+          compared: null,
+          mode: "legacy_unscoped"
+        }),
+        reason: "legacy_scope_unknown"
+      }
+    }
+  };
+}
+
 function mergeModules(previous = {}, current = {}, generatedAt) {
   const keys = new Set([...MODULE_KEYS, ...Object.keys(current)]);
   const modules = {};
@@ -289,6 +389,7 @@ export function createCampusService({
     "schedule-preferences.local.json"
   ),
   adapter,
+  academicCalendarContext,
   now = () => new Date().toISOString(),
   maxActiveDownloads = 2,
   jobTtlSeconds = 60 * 60,
@@ -451,7 +552,9 @@ export function createCampusService({
     const modules = Object.fromEntries(
       [...keys].map((key) => [
         key,
-        summarizeModule(previous?.modules?.[key], current.modules[key])
+        key === "agenda"
+          ? summarizeAgenda(previous?.modules?.[key], current.modules[key])
+          : summarizeModule(previous?.modules?.[key], current.modules[key])
       ])
     );
     const history = await readJsonCache(historyPath, { fallback: [] });
@@ -584,17 +687,18 @@ export function createCampusService({
         matches(`${item.courseCode} ${item.course}`, options.course)
       )
       .filter((item) => item.term === options.term);
-    const matchingAssessments = courseGrades
-      .filter((item) =>
-        kind !== "partial" ||
-        (
+    const matchingAssessments = courseGrades.filter((item) =>
+      kind === "partial"
+        ? (
           searchableText(item.statistics?.evaluationType ?? item.assessmentType) === normalizedType &&
           Number(item.statistics?.evaluationNumber ?? item.assessmentNumber) ===
             Number(options.evaluationNumber)
         )
-      );
+        : item.statistics?.kind === "final" || searchableText(item.item) === "nota final"
+    );
     const candidates = matchingAssessments
       .filter((item) => item.statistics?.kind === kind)
+      .filter((item) => kind !== "final" || /^\d+(?:[.,]\d+)?$/u.test(String(item.grade ?? "").trim()))
       .filter((item) =>
         !options.schedule ||
         item.statistics.schedule === options.schedule
@@ -677,6 +781,25 @@ export function createCampusService({
     });
   }
 
+  function registrationWindowState(snapshot) {
+    const current = Date.parse(now());
+    if (!Number.isFinite(current)) return "unknown";
+    const activeTerm = enrollmentTerm({}, snapshot);
+    const windows = (snapshot?.modules?.enrollment_calendar?.items ?? [])
+      .filter((item) => /matr[ií]cula v[ií]a campus virtual|matr[ií]cula extempor[aá]nea/i.test(item.title ?? ""))
+      .filter((item) => !activeTerm || !item.term || String(item.term) === activeTerm)
+      .map((item) => ({
+        start: Date.parse(item.start ?? item.date ?? ""),
+        end: Date.parse(item.end ?? item.start ?? item.date ?? "")
+      }))
+      .filter(({ start, end }) => Number.isFinite(start) && Number.isFinite(end));
+    if (windows.length === 0) return "unknown";
+    if (windows.some(({ start, end }) => current >= start && current <= end)) return "open";
+    if (current > Math.max(...windows.map(({ end }) => end))) return "closed";
+    if (current < Math.min(...windows.map(({ start }) => start))) return "upcoming";
+    return "between_windows";
+  }
+
   function scheduleTtl(snapshot) {
     return activeEnrollment(snapshot) ? 5 * 60 : 30 * 60;
   }
@@ -703,24 +826,82 @@ export function createCampusService({
       /matr[ií]cula extempor[aá]nea/i.test(action.label ?? "") &&
       action.access !== "blocked"
     );
-    const current = Date.parse(now());
-    if (!Number.isFinite(current)) return true;
-    const windows = (snapshot.modules?.enrollment_calendar?.items ?? [])
-      .filter((item) => /matr[ií]cula v[ií]a campus virtual|matr[ií]cula extempor[aá]nea/i.test(item.title ?? ""))
-      .map((item) => ({
-        start: Date.parse(item.start ?? item.date ?? ""),
-        end: Date.parse(item.end ?? item.start ?? item.date ?? "")
-      }));
-    if (windows.some(({ start, end }) =>
-      Number.isFinite(start) && Number.isFinite(end) && current >= start && current <= end
-    )) return true;
-    const windowStarts = windows.map(({ start }) => start).filter(Number.isFinite);
-    const windowEnds = windows.map(({ end }) => end).filter(Number.isFinite);
-    if (windowEnds.length > 0 && current > Math.max(...windowEnds)) return false;
-    if (windowStarts.length > 0 && current < Math.min(...windowStarts)) {
+    const windowState = registrationWindowState(snapshot);
+    if (windowState === "open") return true;
+    if (windowState === "closed") return false;
+    if (windowState === "upcoming") {
       return regularAdvertised;
     }
-    return regularAdvertised || extemporaneousAdvertised || windows.length === 0;
+    return regularAdvertised || extemporaneousAdvertised || windowState === "unknown";
+  }
+
+  function registrationGuardWorkspace(snapshot, {
+    source,
+    sourcesUsed,
+    academicContext = null
+  }) {
+    const retrievedAt = now();
+    return {
+      state: "unavailable",
+      portalState: "unavailable",
+      reason: "outside_registration_window",
+      enrollmentMode: "closed_or_unavailable",
+      activeTerm: enrollmentTerm({}, snapshot) || null,
+      turn: null,
+      summary: {},
+      registered: [],
+      offerings: [],
+      scopes: { faculties: [], specialties: [] },
+      fallbackTools: ["list_enrolled_courses", "get_student_schedule", "search_course_schedules"],
+      source,
+      sourcesUsed,
+      retrievedAt,
+      ttlSeconds: 24 * 60 * 60,
+      ...(academicContext ? { academicContext } : {}),
+      warnings: ["The live registration portal probe was skipped because the enrollment window is closed. Use forceProbe only for a confirmed exceptional reopening."]
+    };
+  }
+
+  async function registrationProbeGuard(snapshot, { forceProbe = false } = {}) {
+    if (forceProbe || !snapshot) return null;
+    const windowState = registrationWindowState(snapshot);
+    if (windowState === "open") return null;
+    if (windowState === "closed") {
+      return registrationGuardWorkspace(snapshot, {
+        source: "enrollment_calendar_guard",
+        sourcesUsed: ["enrollment_calendar"]
+      });
+    }
+    const sections = snapshot.modules?.enrollment_portal?.value?.sections ?? [];
+    const liveActionAdvertised = sections.some((section) =>
+      (section.actions ?? []).some((action) =>
+        /inscr[ií]bete aqu[ií]|matr[ií]cula extempor[aá]nea/i.test(action.label ?? "") &&
+        action.access !== "blocked"
+      )
+    );
+    if (liveActionAdvertised || typeof academicCalendarContext !== "function") return null;
+    const term = enrollmentTerm({}, snapshot);
+    let context;
+    try {
+      context = await academicCalendarContext({ ...(term ? { term } : {}) });
+    } catch {
+      return null;
+    }
+    if (context?.state !== "available" || !Number.isInteger(context.currentWeek) || context.currentWeek <= 1) {
+      return null;
+    }
+    return registrationGuardWorkspace(snapshot, {
+      source: "academic_calendar_guard",
+      sourcesUsed: ["academic_calendar"],
+      academicContext: {
+        state: context.state,
+        calendarId: context.calendarId ?? null,
+        term: context.term || term || null,
+        currentDate: context.currentDate ?? null,
+        currentWeek: context.currentWeek,
+        kind: context.kind ?? null
+      }
+    });
   }
 
   function scheduleQuery(options, snapshot, { historical = false } = {}) {
@@ -847,7 +1028,7 @@ export function createCampusService({
             `The Campus adapter does not support ${query.mode} course schedule search`
           );
         }
-        const result = await operation.call(adapter, {
+        let result = await operation.call(adapter, {
           ...query,
           ...(query.mode === "current" ? { preferRegistrationPortal } : {}),
           metadataOnly: true,
@@ -855,6 +1036,43 @@ export function createCampusService({
           allowMutations: false,
           useCampusGenerator: false
         });
+        if ((query.courseCodes?.length ?? 0) > 1) {
+          const present = new Set((result.items ?? []).map(({ courseCode }) =>
+            String(courseCode ?? "").toUpperCase()
+          ));
+          const omitted = query.courseCodes.filter((courseCode) => !present.has(courseCode));
+          const recovered = [];
+          const unavailableCourses = [];
+          for (const courseCode of omitted) {
+            try {
+              const individual = await operation.call(adapter, {
+                ...query,
+                courseCodes: [courseCode],
+                ...(query.mode === "current" ? { preferRegistrationPortal } : {}),
+                metadataOnly: true,
+                allowDownloads: false,
+                allowMutations: false,
+                useCampusGenerator: false
+              });
+              if (individual.state === "available" && (individual.items?.length ?? 0) > 0) {
+                recovered.push(...individual.items);
+              } else {
+                unavailableCourses.push(courseCode);
+              }
+            } catch {
+              unavailableCourses.push(courseCode);
+            }
+          }
+          const unique = new Map([...(result.items ?? []), ...recovered].map((item) => [
+            `${item.term ?? ""}|${item.courseCode ?? ""}|${item.scheduleId ?? ""}|${item.scheduleType ?? ""}`,
+            item
+          ]));
+          result = {
+            ...result,
+            items: [...unique.values()],
+            ...(unavailableCourses.length > 0 ? { unavailableCourses } : {})
+          };
+        }
         const generatedAt = result.retrievedAt ?? now();
         const entry = {
           generatedAt,
@@ -1515,17 +1733,110 @@ export function createCampusService({
       (item) => !options.term || !item.term || item.term === options.term,
       500
     );
-  const getStudentSchedule = (options = {}) =>
-    queryModule("student_schedule", options, async (entry) => ({
-      state: "available",
-      activeTerm: entry.term ?? null,
-      source: "student_schedule_page",
-      sourcesUsed: ["student_schedule_page"],
-      count: (entry.items ?? []).length,
-      items: entry.items ?? []
-    }));
+  async function getStudentSchedule(options = {}) {
+    const snapshot = await readSnapshot();
+    const entry = snapshot.modules?.student_schedule ?? unavailable("student_schedule");
+    if (entry.state !== "available") {
+      return queryModule("student_schedule", options, async () => ({}));
+    }
+    const term = entry.term || enrollmentTerm(options, snapshot);
+    const baseItems = entry.items ?? [];
+    const courseCodes = [...new Set(baseItems.map(({ courseCode }) =>
+      String(courseCode ?? "").trim().toUpperCase()
+    ).filter(Boolean))].sort();
+    const cache = await readScheduleCache();
+    const offerings = matchingScheduleItems(cache, { term, courseCodes });
+    const attempted = new Set(cache.entries
+      .filter(({ query }) => query?.mode !== "historical" && (!term || query.term === term || query.term === "active"))
+      .flatMap(({ query }) => query?.courseCodes ?? [])
+      .map((code) => String(code).toUpperCase()));
+    const missingCourses = courseCodes.filter((courseCode) => !attempted.has(courseCode));
+    const staleCourses = courseCodes.filter((courseCode) => {
+      const latest = cache.entries
+        .filter(({ query }) => query?.mode !== "historical" && (query.courseCodes ?? [])
+          .some((code) => String(code).toUpperCase() === courseCode))
+        .sort((left, right) => String(right.generatedAt).localeCompare(String(left.generatedAt)))[0];
+      return latest && shouldRefresh({
+        forceRefresh: Boolean(options.forceRefresh),
+        generatedAt: latest.generatedAt,
+        now: now(),
+        ttlSeconds: scheduleTtl(snapshot)
+      });
+    });
+    const refreshCodes = [...new Set([...missingCourses, ...staleCourses])];
+    const job = refreshCodes.length > 0
+      ? startScheduleSearch(scheduleQuery({ courseCodes: refreshCodes }, snapshot), {
+          preferRegistrationPortal: registrationPortalExpected(snapshot)
+        })
+      : null;
+    if (job) await waitForJobDispatch(job);
+
+    const courseOptions = buildCourseOptions(offerings);
+    const items = baseItems.map((item) => {
+      const optionsForCourse = courseOptions.get(String(item.courseCode).toUpperCase()) ?? [];
+      const option = optionsForCourse.find(({ scheduleId }) =>
+        String(scheduleId) === String(item.scheduleId)
+      );
+      const component = option?.components?.find(({ scheduleId, componentTypes }) =>
+        String(scheduleId) === String(item.scheduleId) &&
+        (!item.scheduleType || componentTypes.includes(item.scheduleType))
+      ) ?? option;
+      const matchingSession = component?.sessions?.find((session) =>
+        session.day === item.day && session.start === item.start && session.end === item.end
+      );
+      return {
+        ...item,
+        professor: item.professor || item.instructor || component?.professor || option?.professor || null,
+        room: item.room || matchingSession?.room || "",
+        enrichmentSource: option ? "schedule_catalog" : null
+      };
+    });
+    const details = courseCodes.map((courseCode) => {
+      const optionsForCourse = courseOptions.get(courseCode) ?? [];
+      const selectedIds = new Set(baseItems
+        .filter((item) => String(item.courseCode).toUpperCase() === courseCode)
+        .map(({ scheduleId }) => String(scheduleId)));
+      const selected = optionsForCourse.filter(({ scheduleId }) => selectedIds.has(String(scheduleId)));
+      return {
+        courseCode,
+        components: [...new Set(selected.flatMap(({ componentTypes = [] }) => componentTypes))],
+        sessions: selected.flatMap(({ sessions = [] }) => sessions),
+        missingFields: selected.length === 0 ? ["catalog_details"] : []
+      };
+    });
+    const pending = missingCourses.length > 0;
+    return envelope(
+      snapshot,
+      entry.generatedAt ?? snapshot.generatedAt,
+      {
+        state: pending ? "pending_enrichment" : "available",
+        answerReady: !pending,
+        activeTerm: term ?? null,
+        source: "student_schedule_page",
+        sourcesUsed: offerings.length > 0
+          ? ["student_schedule_page", "schedule_catalog"]
+          : ["student_schedule_page"],
+        count: items.length,
+        items,
+        courseDetails: details,
+        ...(missingCourses.length > 0 ? { missingCourses } : {}),
+        ...(job ? { refreshJobId: job.jobId } : {})
+      },
+      scheduleTtl(snapshot),
+      pending
+        ? ["The personal schedule is authoritative, but course details are being fetched in one batch. Query get_campus_job_status, then call get_student_schedule again before answering with professors, rooms, practices or exams."]
+        : details.some(({ missingFields }) => missingFields.length > 0)
+          ? ["The personal schedule remains authoritative; only the listed catalog detail fields are unavailable."]
+          : []
+    );
+  }
 
   async function readLiveRegistrationWorkspace(filters = {}) {
+    const snapshot = filters.snapshot ?? await readSnapshot({ optional: true });
+    const guarded = await registrationProbeGuard(snapshot, {
+      forceProbe: filters.forceProbe === true
+    });
+    if (guarded) return guarded;
     if (typeof adapter.readRegistrationWorkspace !== "function") {
       throw new McpToolError(
         "registration_portal_unavailable",
@@ -1587,9 +1898,13 @@ export function createCampusService({
     );
   }
 
-  async function getRegistrationStatus() {
+  async function getRegistrationStatus(options = {}) {
     const snapshot = await readSnapshot();
-    const workspace = await readLiveRegistrationWorkspace();
+    const workspace = await readLiveRegistrationWorkspace({
+      snapshot,
+      forceProbe: options.forceProbe === true
+    });
+    const source = workspace.source ?? "enrollment_portal";
     return envelope(
       { ...snapshot, retrievedAt: workspace.retrievedAt ?? now() },
       workspace.retrievedAt ?? now(),
@@ -1602,12 +1917,13 @@ export function createCampusService({
         turn: workspace.turn ?? null,
         summary: workspace.summary ?? {},
         registered: (workspace.registered ?? []).map(publicRegistrationItem),
-        fallbackTools: workspace.state === "available" ? [] : ["list_enrolled_courses", "get_student_schedule", "search_course_schedules"],
-        source: "enrollment_portal",
-        sourcesUsed: ["enrollment_portal"]
+        fallbackTools: workspace.state === "available" ? [] : (workspace.fallbackTools ?? ["list_enrolled_courses", "get_student_schedule", "search_course_schedules"]),
+        source,
+        sourcesUsed: workspace.sourcesUsed ?? [source],
+        ...(workspace.academicContext ? { academicContext: workspace.academicContext } : {})
       },
-      5 * 60,
-      enrollmentModeWarnings(workspace)
+      workspace.ttlSeconds ?? 5 * 60,
+      [...(workspace.warnings ?? []), ...enrollmentModeWarnings(workspace)]
     );
   }
 
@@ -1887,7 +2203,8 @@ export function createCampusService({
         now: now(),
         ttlSeconds
       });
-    const preferRegistrationPortal = registrationPortalExpected(snapshot);
+    const registrationGuard = await registrationProbeGuard(snapshot);
+    const preferRegistrationPortal = !registrationGuard && registrationPortalExpected(snapshot);
     const job = stale
       ? startScheduleSearch(query, { preferRegistrationPortal })
       : null;
@@ -2415,6 +2732,7 @@ export function createCampusService({
     const syncs = history
       .slice(-clamp(options.limit, 10, 50))
       .reverse()
+      .map(normalizeHistoryEvent)
       .map((event) =>
         options.module
           ? {
@@ -2443,6 +2761,11 @@ export function createCampusService({
 
   async function waitForIdle() {
     await Promise.allSettled([...jobPromises]);
+  }
+
+  async function close() {
+    await waitForIdle();
+    await adapter.close?.();
   }
 
   return {
@@ -2487,6 +2810,7 @@ export function createCampusService({
     searchCourseSchedules,
     searchHistoricalCourseSchedules,
     syncCampusVirtual,
-    waitForIdle
+    waitForIdle,
+    close
   };
 }

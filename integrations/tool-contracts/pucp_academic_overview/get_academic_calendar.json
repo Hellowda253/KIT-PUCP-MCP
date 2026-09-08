@@ -1,6 +1,6 @@
 {
   "name": "get_academic_calendar",
-  "description": "Read locally registered program/term calendars and compute weeks from the current server clock in America/Lima. On first use, calendarRegistration.required instructs the agent to inspect the official PUCP calendar page and call set_academic_calendar before answering a week-dependent question. A computed week above 19 requires verifying the active term and updating the record.",
+  "description": "Read the curated KIT PUCP repository calendar plus optional local overrides and compute weeks from the current server clock in America/Lima. The registry is refreshed automatically and supports regular and summer terms. If the active term is absent, report that limitation; use set_academic_calendar only as a temporary local fallback.",
   "parameters": {
     "type": "object",
     "additionalProperties": false,

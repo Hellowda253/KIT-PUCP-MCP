@@ -7,6 +7,9 @@ import { readJsonCache, writeJsonAtomic } from "./json-cache.js";
 const TIME_ZONE = "America/Lima";
 const MAX_REGULAR_WEEK = 19;
 const OFFICIAL_CALENDAR_HINT = "https://estudiante.pucp.edu.pe/calendario-academico/";
+export const DEFAULT_ACADEMIC_CALENDAR_REGISTRY_URL =
+  "https://raw.githubusercontent.com/Hellowda253/KIT-PUCP-MCP/main/config/academic-calendars.json";
+const DEFAULT_REGISTRY_TTL_MS = 6 * 60 * 60 * 1000;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const daySchema = { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" };
 const textSchema = { type: "string", minLength: 1, maxLength: 200 };
@@ -38,6 +41,49 @@ const calendarSchema = {
 const validateSchema = new Ajv({ strict: true }).compile(calendarSchema);
 const invalid = () => new McpToolError("academic_calendar_invalid", "Check calendar dates, non-overlapping weeks, course scope and a public HTTPS PUCP source without query, fragment or credentials.");
 const normalize = (value) => String(value ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").trim().toLowerCase();
+
+function canonicalProgram(value) {
+  const program = normalize(value).replace(/^programa\s+de\s+/u, "");
+  if (/^pregrado(?:\s+pucp)?$/u.test(program)) return "pregrado";
+  if (/^(?:posgrado|postgrado)(?:\s+pucp)?$/u.test(program)) return "posgrado";
+  if (/^educacion\s+continua(?:\s+pucp)?$/u.test(program)) return "educacion continua";
+  return program;
+}
+
+function verificationPriority(record) {
+  return record.source?.verification === "repository_curated" ? 2 : 1;
+}
+
+function preferredCalendar(left, right) {
+  return verificationPriority(right) > verificationPriority(left) ? right : left;
+}
+
+function equivalentCalendarKey(record) {
+  const courseScope = [...record.courseKeys].map(normalize).sort().join("|");
+  return [
+    normalize(record.term),
+    canonicalProgram(record.program),
+    record.kind,
+    record.startDate,
+    record.endDate,
+    courseScope
+  ].join("\0");
+}
+
+function deduplicateCalendars(records) {
+  const byId = new Map();
+  for (const record of records) {
+    const existing = byId.get(record.id);
+    byId.set(record.id, existing ? preferredCalendar(existing, record) : record);
+  }
+  const equivalent = new Map();
+  for (const record of byId.values()) {
+    const key = equivalentCalendarKey(record);
+    const existing = equivalent.get(key);
+    equivalent.set(key, existing ? preferredCalendar(existing, record) : record);
+  }
+  return [...equivalent.values()];
+}
 
 function validDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(value ?? "")) throw invalid();
@@ -107,12 +153,13 @@ function registrationAction(reason) {
   return {
     required: true,
     reason,
-    action: stale ? "verify_active_term_and_update_calendar" : "register_verified_calendar",
-    tool: "set_academic_calendar",
+    action: stale ? "refresh_curated_calendar_registry" : "refresh_curated_calendar_registry",
+    tool: "get_academic_calendar",
+    fallbackTool: "set_academic_calendar",
     officialSourceHint: OFFICIAL_CALENDAR_HINT,
     instruction: stale
-      ? "Verify the active term and its official PUCP class dates now, then replace or add the matching local calendar before using an academic week."
-      : "On first use, inspect the official PUCP calendar page for the applicable term/program and call set_academic_calendar before answering a week-dependent question."
+      ? "Refresh the curated KIT PUCP calendar registry and verify that it contains the active term. Use set_academic_calendar only as a temporary local fallback if the registry is unavailable or incomplete."
+      : "Refresh the curated KIT PUCP calendar registry. Use set_academic_calendar only as a temporary local fallback when an official term has not yet been published in the registry."
   };
 }
 
@@ -123,7 +170,7 @@ function contextFor(records, options, instant) {
     currentWeek: null, referenceWeek: null, state: "calendar_unavailable",
     guidance: "Use a verified calendar and explicit week labels; never infer the current section from display order. A matching week is not proof of actual teaching progress." };
   const keys = [options.course, ...(options.courseKeys ?? [])].filter(Boolean).map(normalize);
-  if (!keys.length && !options.calendarId && !options.program) return {
+  if (!keys.length && !options.calendarId && !options.program && !options.term) return {
     ...base,
     state: "scope_required",
     ...(records.length ? {} : { calendarRegistration: registrationAction("missing_verified_calendar") })
@@ -131,7 +178,7 @@ function contextFor(records, options, instant) {
   let matches = records.filter((record) =>
     (!options.calendarId || record.id === options.calendarId) &&
     (!options.term || normalize(record.term) === normalize(options.term)) &&
-    (!options.program || normalize(record.program) === normalize(options.program))
+    (!options.program || canonicalProgram(record.program) === canonicalProgram(options.program))
   );
   if (keys.length) {
     const direct = matches.filter((record) => record.courseKeys.some((key) => keys.includes(normalize(key))));
@@ -164,10 +211,17 @@ function contextFor(records, options, instant) {
 
 export function createAcademicCalendarStore({
   filePath = path.join(process.env.PUCP_DATA_DIR || path.join(root, "data"), "academic-calendars.json"),
+  registryUrl = process.env.PUCP_ACADEMIC_CALENDAR_URL || DEFAULT_ACADEMIC_CALENDAR_REGISTRY_URL,
+  registryCachePath = path.join(path.dirname(filePath), "academic-calendar-registry-cache.json"),
+  bundledRegistryPath = path.join(root, "config", "academic-calendars.json"),
+  registryTtlMs = DEFAULT_REGISTRY_TTL_MS,
+  fetchImpl = globalThis.fetch,
   now = () => new Date().toISOString()
 } = {}) {
   let queue = Promise.resolve();
-  async function read() {
+  let registryMemory = null;
+
+  async function readLocal() {
     const value = await readJsonCache(filePath, { fallback: { calendars: [] } });
     if (!Array.isArray(value?.calendars)) throw invalid();
     return value.calendars.map((record) => {
@@ -177,10 +231,75 @@ export function createAcademicCalendarStore({
       return { ...validated, source: { ...validated.source, recordedAt, verification: "agent_reported" } };
     });
   }
+
+  function curatedRecords(document) {
+    if (document?.schemaVersion !== 1 || !Array.isArray(document.calendars) ||
+        !Number.isFinite(Date.parse(document.updatedAt))) throw invalid();
+    return document.calendars.map((record) => {
+      const validated = validatedCalendar(record);
+      return {
+        ...validated,
+        source: {
+          ...validated.source,
+          recordedAt: document.updatedAt,
+          verification: "repository_curated"
+        }
+      };
+    });
+  }
+
+  async function registryFallback() {
+    const cached = await readJsonCache(registryCachePath, { fallback: null });
+    if (cached?.document) {
+      try { return { records: curatedRecords(cached.document), fetchedAt: cached.fetchedAt }; }
+      catch { /* Try the bundled registry below. */ }
+    }
+    if (bundledRegistryPath) {
+      const bundled = await readJsonCache(bundledRegistryPath, { fallback: null });
+      if (bundled) return { records: curatedRecords(bundled), fetchedAt: null };
+    }
+    return { records: [], fetchedAt: null };
+  }
+
+  async function readRegistry() {
+    if (!registryUrl) return [];
+    const instant = now();
+    if (registryMemory && Date.parse(instant) - Date.parse(registryMemory.checkedAt) < registryTtlMs) {
+      return registryMemory.records;
+    }
+    try {
+      const url = new URL(registryUrl);
+      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash ||
+          url.hostname !== "raw.githubusercontent.com" ||
+          !/^\/Hellowda253\/KIT-PUCP-MCP\/(?:main|[0-9a-f]{40})\/config\/academic-calendars\.json$/u.test(url.pathname)) {
+        throw invalid();
+      }
+      if (typeof fetchImpl !== "function") throw new Error("fetch_unavailable");
+      const response = await fetchImpl(url.href, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(5_000)
+      });
+      if (!response?.ok) throw new Error("registry_http_error");
+      const document = await response.json();
+      const records = curatedRecords(document);
+      await writeJsonAtomic(registryCachePath, { fetchedAt: instant, registryUrl: url.href, document });
+      registryMemory = { records, checkedAt: instant };
+      return records;
+    } catch {
+      const fallback = await registryFallback();
+      registryMemory = { records: fallback.records, checkedAt: instant };
+      return fallback.records;
+    }
+  }
+
+  async function read() {
+    const [curated, local] = await Promise.all([readRegistry(), readLocal()]);
+    return deduplicateCalendars([...curated, ...local]);
+  }
   async function save({ calendar }) {
     const record = validatedCalendar(calendar);
     const operation = queue.catch(() => {}).then(async () => {
-      const calendars = await read();
+      const calendars = await readLocal();
       const saved = { ...record, source: { ...record.source, recordedAt: now(), verification: "agent_reported" } };
       await writeJsonAtomic(filePath, { calendars: [...calendars.filter(({ id }) => id !== saved.id), saved] });
       return { state: "saved", calendar: saved, guidance: "Stored locally only. Source verification was reported by the caller, not independently performed by the server." };
@@ -239,7 +358,7 @@ export function withAcademicContext(tools, store) {
       properties: { ...tool.inputSchema.properties, referenceDate: { ...daySchema,
         description: "Optional target class date for material matching; does not replace the current server date." } }
     } } : {}),
-    description: `${tool.description ?? ""} Includes live-clock academicContext. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true on first use or after week 19, inspect the official PUCP page, call set_academic_calendar, and retry before making a week-dependent claim.`,
+    description: `${tool.description ?? ""} Includes live-clock academicContext from the curated KIT PUCP calendar registry. Use referenceWeek and explicit section labels before choosing current materials; use referenceDate for a future class. If calendarRegistration.required is true, refresh the registry with get_academic_calendar and report a missing term honestly; use set_academic_calendar only as a temporary local fallback.`,
     handler: async (args = {}) => {
       const { referenceDate, ...queryArgs } = args;
       if (referenceDate) validDate(referenceDate);
@@ -316,7 +435,7 @@ export function withAcademicContext(tools, store) {
 export function createAcademicCalendarTools(store) {
   return [{
     name: "get_academic_calendar",
-    description: "Read locally registered program/term calendars and compute weeks from the current server clock in America/Lima. On first use, calendarRegistration.required instructs the agent to inspect the official PUCP calendar page and call set_academic_calendar before answering a week-dependent question. A computed week above 19 requires verifying the active term and updating the record.",
+    description: "Read the curated KIT PUCP repository calendar plus optional local overrides and compute weeks from the current server clock in America/Lima. The registry is refreshed automatically and supports regular and summer terms. If the active term is absent, report that limitation; use set_academic_calendar only as a temporary local fallback.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       calendarId: textSchema, course: textSchema, term: textSchema, program: textSchema, date: daySchema
     } },
@@ -324,7 +443,7 @@ export function createAcademicCalendarTools(store) {
     handler: (args) => store.list(args)
   }, {
     name: "set_academic_calendar",
-    description: "Register or replace one LOCAL JSON program calendar after inspecting its official public PUCP page or PDF. Include class start/end, applicable term/program and a short non-personal evidence excerpt. Use courseKeys [\"*\"] only when the source applies to every course in that program; otherwise list explicit identifiers. Use separate summer/intensive calendars and published week intervals when available. Does not alter Campus.",
+    description: "Register or replace one LOCAL fallback calendar after inspecting an official public PUCP page or PDF. Prefer the automatically downloaded curated repository registry. Include class start/end, applicable term/program and a short non-personal evidence excerpt. Use separate summer/intensive calendars and published week intervals when available. Does not alter Campus.",
     inputSchema: { type: "object", additionalProperties: false, required: ["calendar"], properties: { calendar: calendarSchema } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     handler: (args) => store.save(args)
