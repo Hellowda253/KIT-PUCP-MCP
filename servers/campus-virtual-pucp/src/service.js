@@ -2,15 +2,19 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import {
+  buildCanonicalStudentSchedule,
+  buildCourseOptions,
   McpToolError,
   TTL_SECONDS,
   createEnvelope,
+  enrichScheduleItemsWithAgenda,
   readJsonCache,
   shouldRefresh,
   writeJsonAtomic
 } from "@pucp-academic-mcp/common";
 
 import { searchableText } from "./text.js";
+import { normalizeScheduleId } from "./schedule-reference.js";
 import {
   DEFAULT_SCHEDULE_PREFERENCES,
   assessEnrollmentRisk,
@@ -18,7 +22,6 @@ import {
   mergeSchedulePreferences,
   recommendCourseSchedules as recommendSchedulesLocally
 } from "./schedule-optimizer.js";
-import { buildCourseOptions } from "./schedule-components.js";
 
 const SOURCE = "campus_virtual_pucp";
 const MODULE_KEYS = [
@@ -109,6 +112,8 @@ function safeJobError(error) {
   }
   const known = new Set([
     "authentication_required",
+    "campus_agenda_refresh_failed",
+    "campus_sync_degraded",
     "current_term_unavailable",
     "document_not_downloadable",
     "document_too_large",
@@ -130,6 +135,8 @@ function safeJobError(error) {
   const code = known.has(normalized) ? normalized : "operation_failed";
   const messages = {
     authentication_required: "Campus Virtual authentication is required",
+    campus_agenda_refresh_failed: "The Campus agenda refresh failed and the last valid cache was preserved",
+    campus_sync_degraded: "Campus Virtual returned a broadly degraded snapshot and the last valid cache was preserved",
     current_term_unavailable: "The active Campus term is unavailable",
     network_error: "Campus Virtual returned a network error",
     registration_portal_not_visible: "The Campus registration view is not visible",
@@ -142,7 +149,14 @@ function safeJobError(error) {
   const result = {
     code,
     message: messages[code] ?? "The Campus Virtual background operation failed",
-    retryable: ["network_error", "operation_failed", "timeout", "transient_error"].includes(code)
+    retryable: [
+      "campus_agenda_refresh_failed",
+      "campus_sync_degraded",
+      "network_error",
+      "operation_failed",
+      "timeout",
+      "transient_error"
+    ].includes(code)
   };
   if (/^[a-z0-9_.-]{1,80}$/i.test(String(error?.stage ?? ""))) {
     result.stage = error.stage;
@@ -207,6 +221,86 @@ function agendaRange(entry) {
     : null;
 }
 
+function agendaRanges(entry) {
+  const candidates = Array.isArray(entry?.ranges)
+    ? entry.ranges
+    : [entry?.range];
+  return candidates
+    .map((range) => agendaRange({ range }))
+    .filter(Boolean)
+    .sort((left, right) =>
+      left.start.localeCompare(right.start) || left.end.localeCompare(right.end)
+    );
+}
+
+function nextIsoDate(value) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function addIsoDays(value, amount) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
+function mergeAgendaRanges(...groups) {
+  const ranges = groups.flat().filter(Boolean).sort((left, right) =>
+    left.start.localeCompare(right.start) || left.end.localeCompare(right.end)
+  );
+  const merged = [];
+  for (const range of ranges) {
+    const last = merged.at(-1);
+    if (!last || range.start > nextIsoDate(last.end)) {
+      merged.push({ ...range });
+      continue;
+    }
+    if (range.end > last.end) last.end = range.end;
+  }
+  return merged;
+}
+
+function mergeAgendaEntries(previous, current, generatedAt) {
+  if (previous?.state !== "available" || current?.state !== "available") {
+    return { ...current, generatedAt: current?.generatedAt ?? generatedAt };
+  }
+  const priorRanges = agendaRanges(previous);
+  const currentRanges = agendaRanges(current);
+  if (currentRanges.length === 0) {
+    return { ...current, generatedAt: current.generatedAt ?? generatedAt };
+  }
+  const insideCurrentScope = (item) => {
+    const date = agendaItemDate(item);
+    return Boolean(date && currentRanges.some(({ start, end }) => date >= start && date <= end));
+  };
+  const items = [
+    ...(previous.items ?? []).filter((item) => !insideCurrentScope(item)),
+    ...(current.items ?? [])
+  ];
+  const deduplicated = [...new Map(
+    items.map((item, index) => [itemKey(item, index), item])
+  ).values()].sort((left, right) =>
+    `${agendaItemDate(left) ?? ""} ${left.beginTime ?? ""} ${itemKey(left, 0)}`.localeCompare(
+      `${agendaItemDate(right) ?? ""} ${right.beginTime ?? ""} ${itemKey(right, 0)}`
+    )
+  );
+  const ranges = mergeAgendaRanges(priorRanges, currentRanges);
+  return {
+    ...previous,
+    ...current,
+    generatedAt: current.generatedAt ?? generatedAt,
+    items: deduplicated,
+    ranges,
+    lastRefreshRange: currentRanges.length === 1
+      ? { ...currentRanges[0] }
+      : current.range ?? null,
+    range: ranges.length > 0
+      ? { start: ranges[0].start, end: ranges.at(-1).end }
+      : current.range ?? previous.range ?? null
+  };
+}
+
 function agendaItemDate(item) {
   const value = item?.beginDate ?? item?.date ?? item?.start ?? item?.at ?? "";
   const date = String(value).slice(0, 10);
@@ -228,7 +322,7 @@ function emptyChange(scope) {
 
 function summarizeAgenda(previous, current) {
   const before = agendaRange(previous);
-  const after = agendaRange(current);
+  const after = agendaRange({ range: current?.lastRefreshRange }) ?? agendaRange(current);
   if (!before && !after) {
     return {
       ...summarizeModule(previous, current),
@@ -325,12 +419,44 @@ function mergeModules(previous = {}, current = {}, generatedAt) {
       };
       continue;
     }
+    if (key === "agenda" && next.state === "available") {
+      modules[key] = mergeAgendaEntries(prior, next, generatedAt);
+      continue;
+    }
     modules[key] = {
       ...next,
       generatedAt: next.generatedAt ?? generatedAt
     };
   }
   return modules;
+}
+
+const SYNC_HEALTH_MODULES = [
+  "agenda",
+  "student_schedule",
+  "enrolled_courses",
+  "official_grades",
+  "academic_history",
+  "curriculum"
+];
+
+function broadSyncAccessFailure(previous = {}, current = {}) {
+  const previouslyAvailable = SYNC_HEALTH_MODULES.filter(
+    (key) => previous[key]?.state === "available"
+  );
+  if (previouslyAvailable.length < 3) return false;
+  const currentlyAvailable = SYNC_HEALTH_MODULES.filter(
+    (key) => current[key]?.state === "available"
+  );
+  if (currentlyAvailable.length > 0) return false;
+  const accessFailureReasons = new Set([
+    "authentication_required",
+    "role_unavailable",
+    "session_expired"
+  ]);
+  return previouslyAvailable.every((key) =>
+    accessFailureReasons.has(current[key]?.reason)
+  );
 }
 
 function parseIsoDate(value, name) {
@@ -577,11 +703,14 @@ export function createCampusService({
       const requestedEnd = options.end ?? requestedStart;
       const activeStart = active.syncOptions?.start ?? "";
       const activeEnd = active.syncOptions?.end ?? activeStart;
+      const requestedScope = options.moduleScope ?? "all";
+      const activeScope = active.syncOptions?.moduleScope ?? "all";
+      const activeCoversScope = activeScope === "all" || activeScope === requestedScope;
       const activeCoversRequest =
         !requestedStart ||
         (!activeStart && !activeEnd) ||
         (activeStart <= requestedStart && activeEnd >= requestedEnd);
-      if (activeCoversRequest) return active;
+      if (activeCoversScope && activeCoversRequest) return active;
     }
     const job = startJob("sync", async (jobId) => {
       const previous = await readSnapshot({ optional: true });
@@ -595,14 +724,42 @@ export function createCampusService({
         allowMutations: false
       });
       const generatedAt = scraped.generatedAt ?? now();
+      const moduleScope = options.moduleScope ?? "all";
+      if (
+        moduleScope === "agenda" &&
+        previous?.modules?.agenda?.state === "available" &&
+        scraped.modules?.agenda?.state !== "available"
+      ) {
+        throw new McpToolError(
+          "campus_agenda_refresh_failed",
+          "Campus did not return a usable agenda; the previous cache was left untouched",
+          { retryable: true }
+        );
+      }
+      if (
+        moduleScope === "all" &&
+        broadSyncAccessFailure(previous?.modules, scraped.modules)
+      ) {
+        throw new McpToolError(
+          "campus_sync_degraded",
+          "Campus returned a broad access failure; the previous cache was left untouched",
+          { retryable: true }
+        );
+      }
+      const modules = moduleScope === "agenda"
+        ? {
+            ...(previous?.modules ?? {}),
+            agenda: mergeAgendaEntries(
+              previous?.modules?.agenda,
+              scraped.modules?.agenda,
+              generatedAt
+            )
+          }
+        : mergeModules(previous?.modules, scraped.modules, generatedAt);
       const current = {
         generatedAt,
         retrievedAt: scraped.retrievedAt ?? generatedAt,
-        modules: mergeModules(
-          previous?.modules,
-          scraped.modules,
-          generatedAt
-        )
+        modules
       };
       await writeJsonAtomic(cachePath, current);
       const event = await recordChanges(jobId, previous, current);
@@ -623,7 +780,8 @@ export function createCampusService({
     job.syncOptions = {
       start: options.start ?? "",
       end: options.end ?? options.start ?? "",
-      reason: options.reason ?? ""
+      reason: options.reason ?? "",
+      moduleScope: options.moduleScope ?? "all"
     };
     activeSyncJobId = job.jobId;
     return job;
@@ -680,7 +838,31 @@ export function createCampusService({
     });
   }
 
+  function requestedGradeStatisticsScope(options = {}) {
+    const scope = options.scope ?? (options.schedule ? "schedule" : "student_schedule");
+    if (!["student_schedule", "schedule", "all"].includes(scope)) {
+      throw new McpToolError(
+        "grade_statistics_scope_invalid",
+        "Grade statistics scope must be student_schedule, schedule, or all"
+      );
+    }
+    if (scope === "schedule" && !options.schedule) {
+      throw new McpToolError(
+        "grade_statistics_schedule_required",
+        "Provide schedule when grade statistics scope is schedule"
+      );
+    }
+    if (options.scope && scope !== "schedule" && options.schedule) {
+      throw new McpToolError(
+        "grade_statistics_scope_conflict",
+        "Do not provide schedule unless grade statistics scope is schedule"
+      );
+    }
+    return scope;
+  }
+
   function gradeStatisticsReference(kind, options, snapshot) {
+    const scope = requestedGradeStatisticsScope(options);
     const normalizedType = searchableText(options.evaluationType);
     const courseGrades = (snapshot.modules?.official_grades?.items ?? [])
       .filter((item) =>
@@ -696,13 +878,24 @@ export function createCampusService({
         )
         : item.statistics?.kind === "final" || searchableText(item.item) === "nota final"
     );
-    const candidates = matchingAssessments
+    let candidates = matchingAssessments
       .filter((item) => item.statistics?.kind === kind)
-      .filter((item) => kind !== "final" || /^\d+(?:[.,]\d+)?$/u.test(String(item.grade ?? "").trim()))
-      .filter((item) =>
-        !options.schedule ||
-        item.statistics.schedule === options.schedule
+      .filter((item) => kind !== "final" || /^\d+(?:[.,]\d+)?$/u.test(String(item.grade ?? "").trim()));
+    if (scope === "schedule") {
+      candidates = candidates.filter((item) => item.statistics.schedule === options.schedule);
+    } else if (scope === "student_schedule" && candidates.length > 1) {
+      const enrolledSchedules = new Set(
+        (snapshot.modules?.enrolled_courses?.items ?? [])
+          .filter((item) => matches(`${item.code} ${item.name}`, options.course))
+          .filter((item) => !item.term || item.term === options.term)
+          .map((item) => String(item.schedule ?? "").trim())
+          .filter(Boolean)
       );
+      const enrolledCandidates = candidates.filter((item) =>
+        enrolledSchedules.has(String(item.statistics.schedule ?? "").trim())
+      );
+      if (enrolledCandidates.length > 0) candidates = enrolledCandidates;
+    }
     if (candidates.length === 0) {
       return {
         state: "unavailable",
@@ -713,7 +906,7 @@ export function createCampusService({
             : "final_grade_not_found"
       };
     }
-    if (candidates.length > 1) {
+    if (candidates.length > 1 && scope !== "all") {
       throw new McpToolError(
         "grade_statistics_ambiguous",
         "More than one cached Campus grade matches; specify schedule",
@@ -728,21 +921,34 @@ export function createCampusService({
         }
       );
     }
-    return { state: "available", reference: candidates[0].statistics };
+    const selected = [...candidates].sort((left, right) =>
+      String(left.statistics.schedule ?? "").localeCompare(String(right.statistics.schedule ?? ""))
+    )[0].statistics;
+    return {
+      state: "available",
+      reference: { ...selected, statisticsScope: scope }
+    };
   }
 
   function gradeStatisticsKey(reference) {
-    return [
+    const parts = [
       reference.kind,
       reference.year,
       reference.cycle,
       reference.cycleType,
-      reference.courseCode,
+      reference.courseCode
+    ];
+    // Keep the legacy key for per-schedule reports so existing installations do
+    // not discard valid cache entries. Only the institutional aggregate needs a
+    // separate namespace because it is a genuinely different population.
+    if (reference.statisticsScope === "all") parts.push("all");
+    parts.push(
       reference.schedule,
       reference.evaluationType ?? "",
       reference.evaluationNumber ?? "",
       reference.faculty ?? ""
-    ].join("|");
+    );
+    return parts.join("|");
   }
 
   async function readGradeStatisticsCache() {
@@ -804,13 +1010,20 @@ export function createCampusService({
     return activeEnrollment(snapshot) ? 5 * 60 : 30 * 60;
   }
 
-  function enrollmentTerm(options, snapshot, { historical = false } = {}) {
+  function enrollmentTerm(options, snapshot, { historical = false, scheduleCache = null } = {}) {
     if (historical) return String(options.term ?? "").trim();
     const candidates = [
       snapshot.modules?.enrollment?.value?.term,
       snapshot.modules?.student_schedule?.term,
       ...(snapshot.modules?.enrolled_courses?.items ?? []).map(({ term }) => term),
-      ...(snapshot.modules?.agenda?.items ?? []).map(({ term }) => term)
+      ...(snapshot.modules?.agenda?.items ?? []).map(({ term }) => term),
+      ...(scheduleCache?.entries ?? [])
+        .filter((entry) => entry.query?.mode !== "historical")
+        .flatMap((entry) => [
+          entry.activeTerm,
+          entry.query?.term === "active" ? "" : entry.query?.term,
+          ...(entry.items ?? []).map(({ term }) => term)
+        ])
     ].filter((term) => /^\d{4}-\d{1,2}$/.test(String(term ?? "")));
     return candidates.sort((left, right) => String(right).localeCompare(String(left)))[0] ?? "";
   }
@@ -884,6 +1097,26 @@ export function createCampusService({
     let context;
     try {
       context = await academicCalendarContext({ ...(term ? { term } : {}) });
+      if (["calendar_ambiguous", "scope_required"].includes(context?.state)) {
+        const courseKeys = [
+          ...(snapshot.modules?.enrolled_courses?.items ?? []).map((item) =>
+            item.code ?? item.courseCode
+          ),
+          ...(snapshot.modules?.student_schedule?.items ?? []).map((item) =>
+            item.courseCode ?? item.code
+          )
+        ].map((value) => String(value ?? "").trim()).filter(Boolean);
+        for (const course of [...new Set(courseKeys)]) {
+          const scoped = await academicCalendarContext({
+            ...(term ? { term } : {}),
+            course
+          });
+          if (scoped?.state === "available") {
+            context = scoped;
+            break;
+          }
+        }
+      }
     } catch {
       return null;
     }
@@ -904,8 +1137,8 @@ export function createCampusService({
     });
   }
 
-  function scheduleQuery(options, snapshot, { historical = false } = {}) {
-    const term = enrollmentTerm(options, snapshot, { historical });
+  function scheduleQuery(options, snapshot, { historical = false, scheduleCache = null } = {}) {
+    const term = enrollmentTerm(options, snapshot, { historical, scheduleCache });
     const courseCodes = [...new Set((options.courseCodes ?? []).map((code) =>
       String(code).trim().toUpperCase()
     ).filter(Boolean))].sort();
@@ -1105,6 +1338,7 @@ export function createCampusService({
   }
 
   function matchingScheduleItems(cache, { term, courseCodes = [], course, schedule } = {}) {
+    const wantedSchedule = schedule ? normalizeScheduleId(schedule) : "";
     const wanted = new Set(
       [...courseCodes, course].filter(Boolean).map((code) => String(code).toUpperCase())
     );
@@ -1114,7 +1348,7 @@ export function createCampusService({
         if (entry.query?.mode === "historical") continue;
         if (term && term !== "active" && item.term && item.term !== term) continue;
         if (wanted.size > 0 && !wanted.has(String(item.courseCode).toUpperCase())) continue;
-        if (schedule && String(item.scheduleId) !== String(schedule)) continue;
+        if (wantedSchedule && String(item.scheduleId) !== wantedSchedule) continue;
         const key = `${item.term}|${item.courseCode}|${item.scheduleId}|${item.scheduleType ?? ""}`;
         found.set(key, item);
       }
@@ -1151,6 +1385,22 @@ export function createCampusService({
   }
 
   function statisticsWithScope(data, reference, options = {}) {
+    const requested = requestedGradeStatisticsScope(options);
+    if (requested === "all") {
+      return {
+        ...data,
+        schedule: "",
+        scope: {
+          requested: "all",
+          resolved: "all",
+          requestedSchedule: null,
+          resolvedSchedule: null,
+          reportSchedule: null,
+          reportLabel: String(data?.reportLabel ?? data?.schedule ?? "Todos").trim() || "Todos",
+          kind: "all"
+        }
+      };
+    }
     const reportSchedule = String(data?.schedule ?? "").trim() || null;
     const resolvedSchedule = reportSchedule || String(reference?.schedule ?? "").trim() || null;
     return {
@@ -1166,6 +1416,12 @@ export function createCampusService({
   }
 
   async function getGradeStatistics(kind, options) {
+    const scope = requestedGradeStatisticsScope(options);
+    options = {
+      ...options,
+      scope,
+      ...(options.schedule ? { schedule: normalizeScheduleId(options.schedule) } : {})
+    };
     const snapshot = await readSnapshot();
     const lookup = gradeStatisticsReference(kind, options, snapshot);
     if (lookup.state !== "available") {
@@ -1179,6 +1435,8 @@ export function createCampusService({
             kind,
             course: options.course,
             term: options.term,
+            scope,
+            ...(options.schedule ? { schedule: options.schedule } : {}),
             ...(kind === "partial"
               ? {
                   evaluationType: options.evaluationType,
@@ -1262,6 +1520,8 @@ export function createCampusService({
           kind,
           course: options.course,
           term: options.term,
+          scope,
+          ...(options.schedule ? { schedule: options.schedule } : {}),
           ...(kind === "partial"
             ? {
                 evaluationType: options.evaluationType,
@@ -1310,6 +1570,7 @@ export function createCampusService({
 
   async function getCampusAgenda(options = {}) {
     const snapshot = await readSnapshot();
+    const activeTerm = enrollmentTerm({}, snapshot) || null;
     const entry = snapshot.modules?.agenda ?? unavailable("agenda");
     const generated = entry.generatedAt ?? snapshot.generatedAt;
     const start = options.start
@@ -1322,16 +1583,13 @@ export function createCampusService({
       throw new McpToolError("invalid_date", "start must not be after end");
     }
 
-    const cachedStart = entry.range?.start ?? "";
-    const cachedEnd = entry.range?.end ?? "";
-    const rangeCovered =
-      Boolean(cachedStart && cachedEnd) &&
-      start >= cachedStart &&
-      end <= cachedEnd;
-    const rangeOverlaps =
-      Boolean(cachedStart && cachedEnd) &&
-      start <= cachedEnd &&
-      end >= cachedStart;
+    const cachedRanges = agendaRanges(entry);
+    const rangeCovered = cachedRanges.some((range) =>
+      start >= range.start && end <= range.end
+    );
+    const rangeOverlaps = cachedRanges.some((range) =>
+      start <= range.end && end >= range.start
+    );
     const stale = shouldRefresh({
       forceRefresh: Boolean(options.forceRefresh),
       generatedAt: generated,
@@ -1345,7 +1603,7 @@ export function createCampusService({
         ? "forced"
         : "stale";
     const job = needsRefresh
-      ? startSync({ reason, start, end })
+      ? startSync({ reason, start, end, moduleScope: "agenda" })
       : null;
     if (job) await waitForJobDispatch(job);
     const warnings = [];
@@ -1367,8 +1625,10 @@ export function createCampusService({
           ? {
               state: "unavailable",
               reason: "range_not_cached",
+              activeTerm,
               authoritative: false,
               range: entry.range ?? null,
+              ranges: cachedRanges,
               query: {
                 start,
                 end,
@@ -1380,8 +1640,10 @@ export function createCampusService({
             }
           : {
               ...cleanUnavailable("agenda", entry),
+              activeTerm,
               authoritative: false,
               range: entry.range ?? null,
+              ranges: cachedRanges,
               query: {
                 start,
                 end,
@@ -1419,8 +1681,10 @@ export function createCampusService({
       .slice(0, clamp(options.limit, 80, 200));
     const data = {
       state: "available",
+      activeTerm,
       authoritative: rangeCovered,
       range: entry.range ?? null,
+      ranges: cachedRanges,
       query: { start, end, course: options.course ?? "", kind: options.kind ?? "" },
       count: items.length,
       items
@@ -1437,7 +1701,26 @@ export function createCampusService({
 
   async function getCampusDay(options) {
     const date = parseIsoDate(options.date, "date");
-    return getCampusAgenda({ ...options, start: date, end: date });
+    const response = await getCampusAgenda({
+      ...options,
+      start: addIsoDays(date, -1),
+      end: addIsoDays(date, 1)
+    });
+    const items = (response.data.items ?? []).filter((item) =>
+      agendaItemDate(item) === date
+    );
+    response.data = {
+      ...response.data,
+      query: {
+        start: date,
+        end: date,
+        course: options.course ?? "",
+        kind: options.kind ?? ""
+      },
+      count: items.length,
+      items
+    };
+    return response;
   }
 
   const listEnrolledCourses = (options = {}) =>
@@ -1733,6 +2016,7 @@ export function createCampusService({
       (item) => !options.term || !item.term || item.term === options.term,
       500
     );
+
   async function getStudentSchedule(options = {}) {
     const snapshot = await readSnapshot();
     const entry = snapshot.modules?.student_schedule ?? unavailable("student_schedule");
@@ -1745,7 +2029,10 @@ export function createCampusService({
       String(courseCode ?? "").trim().toUpperCase()
     ).filter(Boolean))].sort();
     const cache = await readScheduleCache();
-    const offerings = matchingScheduleItems(cache, { term, courseCodes });
+    const offerings = enrichScheduleItemsWithAgenda(
+      matchingScheduleItems(cache, { term, courseCodes }),
+      snapshot
+    );
     const attempted = new Set(cache.entries
       .filter(({ query }) => query?.mode !== "historical" && (!term || query.term === term || query.term === "active"))
       .flatMap(({ query }) => query?.courseCodes ?? [])
@@ -1764,53 +2051,75 @@ export function createCampusService({
       });
     });
     const refreshCodes = [...new Set([...missingCourses, ...staleCourses])];
-    const job = refreshCodes.length > 0
-      ? startScheduleSearch(scheduleQuery({ courseCodes: refreshCodes }, snapshot), {
+    const scheduleJob = refreshCodes.length > 0
+      ? startScheduleSearch(scheduleQuery({ courseCodes: refreshCodes }, snapshot, { scheduleCache: cache }), {
           preferRegistrationPortal: registrationPortalExpected(snapshot)
         })
       : null;
-    if (job) await waitForJobDispatch(job);
+    if (scheduleJob) await waitForJobDispatch(scheduleJob);
 
-    const courseOptions = buildCourseOptions(offerings);
-    const items = baseItems.map((item) => {
-      const optionsForCourse = courseOptions.get(String(item.courseCode).toUpperCase()) ?? [];
-      const option = optionsForCourse.find(({ scheduleId }) =>
-        String(scheduleId) === String(item.scheduleId)
+    const { items, courseDetails: details } = buildCanonicalStudentSchedule(
+      baseItems,
+      offerings
+    );
+    const missingExamDetails = details.flatMap((detail) =>
+      detail.sessions
+        .filter((session) => searchableText(session.kind).includes("exam"))
+        .filter((session) => !(session.date ?? session.beginDate) || !session.examType)
+        .map((session) => ({
+          courseCode: detail.courseCode,
+          scheduleId: session.scheduleId ?? detail.scheduleIds?.[0] ?? "",
+          day: session.day ?? "",
+          start: session.start ?? "",
+          end: session.end ?? "",
+          missing: [
+            ...((session.date ?? session.beginDate) ? [] : ["date"]),
+            ...(session.examType ? [] : ["examType"])
+          ]
+        }))
+    );
+    let agendaJob = null;
+    if (
+      !scheduleJob &&
+      missingExamDetails.length > 0 &&
+      typeof academicCalendarContext === "function"
+    ) {
+      let context = await academicCalendarContext({ ...(term ? { term } : {}) });
+      if (["calendar_ambiguous", "scope_required"].includes(context?.state) && courseCodes[0]) {
+        context = await academicCalendarContext({
+          ...(term ? { term } : {}),
+          course: courseCodes[0]
+        });
+      }
+      const fullRange = agendaRange({
+        range: { start: context?.startDate, end: context?.endDate }
+      });
+      const covered = fullRange && agendaRanges(snapshot.modules?.agenda).some((range) =>
+        range.start <= fullRange.start && range.end >= fullRange.end
       );
-      const component = option?.components?.find(({ scheduleId, componentTypes }) =>
-        String(scheduleId) === String(item.scheduleId) &&
-        (!item.scheduleType || componentTypes.includes(item.scheduleType))
-      ) ?? option;
-      const matchingSession = component?.sessions?.find((session) =>
-        session.day === item.day && session.start === item.start && session.end === item.end
-      );
-      return {
-        ...item,
-        professor: item.professor || item.instructor || component?.professor || option?.professor || null,
-        room: item.room || matchingSession?.room || "",
-        enrichmentSource: option ? "schedule_catalog" : null
-      };
-    });
-    const details = courseCodes.map((courseCode) => {
-      const optionsForCourse = courseOptions.get(courseCode) ?? [];
-      const selectedIds = new Set(baseItems
-        .filter((item) => String(item.courseCode).toUpperCase() === courseCode)
-        .map(({ scheduleId }) => String(scheduleId)));
-      const selected = optionsForCourse.filter(({ scheduleId }) => selectedIds.has(String(scheduleId)));
-      return {
-        courseCode,
-        components: [...new Set(selected.flatMap(({ componentTypes = [] }) => componentTypes))],
-        sessions: selected.flatMap(({ sessions = [] }) => sessions),
-        missingFields: selected.length === 0 ? ["catalog_details"] : []
-      };
-    });
-    const pending = missingCourses.length > 0;
+      if (fullRange && !covered) {
+        agendaJob = startSync({
+          reason: "schedule_exam_enrichment",
+          start: fullRange.start,
+          end: fullRange.end,
+          moduleScope: "agenda"
+        });
+        await waitForJobDispatch(agendaJob);
+      }
+    }
+    const refreshJob = scheduleJob ?? agendaJob;
+    const pending = missingCourses.length > 0 || Boolean(agendaJob);
+    const temporalCompleteness = missingExamDetails.length === 0
+      ? "complete"
+      : agendaJob ? "pending" : "partial";
+    const answerReady = !pending && missingExamDetails.length === 0;
     return envelope(
       snapshot,
       entry.generatedAt ?? snapshot.generatedAt,
       {
-        state: pending ? "pending_enrichment" : "available",
-        answerReady: !pending,
+        state: pending ? "pending_enrichment" : answerReady ? "available" : "available_partial",
+        weeklyPatternReady: true,
+        answerReady,
         activeTerm: term ?? null,
         source: "student_schedule_page",
         sourcesUsed: offerings.length > 0
@@ -1819,12 +2128,18 @@ export function createCampusService({
         count: items.length,
         items,
         courseDetails: details,
+        temporalCompleteness,
+        ...(missingExamDetails.length > 0 ? { missingExamDetails } : {}),
         ...(missingCourses.length > 0 ? { missingCourses } : {}),
-        ...(job ? { refreshJobId: job.jobId } : {})
+        ...(refreshJob ? { refreshJobId: refreshJob.jobId } : {})
       },
       scheduleTtl(snapshot),
       pending
-        ? ["The personal schedule is authoritative, but course details are being fetched in one batch. Query get_campus_job_status, then call get_student_schedule again before answering with professors, rooms, practices or exams."]
+        ? [agendaJob
+            ? "The personal weekly pattern is available, but the full academic-term agenda is being refreshed to date its published exams. Query get_campus_job_status, then call get_student_schedule again before presenting exam dates."
+            : "The personal schedule is authoritative, but course details are being fetched in one batch. Query get_campus_job_status, then call get_student_schedule again before answering with professors, rooms, practices or exams."]
+        : missingExamDetails.length > 0
+          ? ["Campus publishes the listed exam slots without enough date/type evidence. The weekly schedule is usable, but those exam details remain explicitly partial."]
         : details.some(({ missingFields }) => missingFields.length > 0)
           ? ["The personal schedule remains authoritative; only the listed catalog detail fields are unavailable."]
           : []
@@ -1958,7 +2273,7 @@ export function createCampusService({
   function requestedRegistrationSelections(values = []) {
     return values.map((item) => ({
       courseCode: String(item.courseCode ?? "").trim().toUpperCase(),
-      scheduleId: String(item.scheduleId ?? "").trim(),
+      scheduleId: normalizeScheduleId(item.scheduleId),
       scheduleType: String(item.scheduleType ?? "").trim().toLowerCase()
     }));
   }
@@ -2191,8 +2506,8 @@ export function createCampusService({
 
   async function searchCourseSchedules(options = {}) {
     const snapshot = await readSnapshot();
-    const query = scheduleQuery(options, snapshot);
     const cache = await readScheduleCache();
+    const query = scheduleQuery(options, snapshot, { scheduleCache: cache });
     const cached = newestScheduleEntry(cache, query);
     const ttlSeconds = scheduleTtl(snapshot);
     const stale =
@@ -2223,6 +2538,7 @@ export function createCampusService({
     const page = clamp(options.page, 1, 1000);
     const pageSize = clamp(options.pageSize, 100, 500);
     const start = (page - 1) * pageSize;
+    const enrichedItems = enrichScheduleItemsWithAgenda(cached.items, snapshot);
     const data = {
       state: cached.state ?? "available",
       query,
@@ -2233,8 +2549,8 @@ export function createCampusService({
       differences: cached.differences ?? [],
       page,
       pageSize,
-      total: cached.items.length,
-      items: cached.items.slice(start, start + pageSize)
+      total: enrichedItems.length,
+      items: enrichedItems.slice(start, start + pageSize)
     };
     if (job) data.refreshJobId = job.jobId;
     return envelope(
@@ -2275,6 +2591,7 @@ export function createCampusService({
     const page = clamp(options.page, 1, 1000);
     const pageSize = clamp(options.pageSize, 100, 500);
     const start = (page - 1) * pageSize;
+    const enrichedItems = enrichScheduleItemsWithAgenda(cached.items, snapshot);
     const data = {
       state: cached.state ?? "available",
       query,
@@ -2282,8 +2599,8 @@ export function createCampusService({
       sourcesUsed: ["schedule_catalog"],
       page,
       pageSize,
-      total: cached.items.length,
-      items: cached.items.slice(start, start + pageSize)
+      total: enrichedItems.length,
+      items: enrichedItems.slice(start, start + pageSize)
     };
     if (job) data.refreshJobId = job.jobId;
     return envelope(
@@ -2300,17 +2617,18 @@ export function createCampusService({
 
   async function scheduleLookup(options, select) {
     const snapshot = await readSnapshot();
-    const term = enrollmentTerm(options, snapshot);
     const cache = await readScheduleCache();
-    const items = matchingScheduleItems(cache, {
+    const term = enrollmentTerm(options, snapshot, { scheduleCache: cache });
+    const cachedItems = matchingScheduleItems(cache, {
       term,
       course: options.course,
       schedule: options.schedule
     });
     const newest = cache.entries
-      .filter((entry) => (entry.items ?? []).some((item) => items.includes(item)))
+      .filter((entry) => (entry.items ?? []).some((item) => cachedItems.includes(item)))
       .sort((left, right) => String(right.generatedAt).localeCompare(String(left.generatedAt)))[0] ?? null;
-    const query = scheduleQuery({ courseCodes: [options.course] }, snapshot);
+    const items = enrichScheduleItemsWithAgenda(cachedItems, snapshot);
+    const query = scheduleQuery({ courseCodes: [options.course] }, snapshot, { scheduleCache: cache });
     const stale =
       items.length === 0 ||
       shouldRefresh({
@@ -2349,6 +2667,10 @@ export function createCampusService({
   }
 
   async function getCourseScheduleDetails(options) {
+    options = {
+      ...options,
+      ...(options.schedule ? { schedule: normalizeScheduleId(options.schedule) } : {})
+    };
     const snapshot = await readSnapshot();
     let liveOfferings = [];
     let liveWarning = "";
@@ -2484,10 +2806,13 @@ export function createCampusService({
 
   async function localScheduleContext(options, operation) {
     const snapshot = await readSnapshot();
-    const term = enrollmentTerm(options, snapshot);
     const courseCodes = options.courseCodes ?? options.selections?.map(({ courseCode }) => courseCode) ?? [];
     const cache = await readScheduleCache();
-    const offerings = matchingScheduleItems(cache, { term, courseCodes });
+    const term = enrollmentTerm(options, snapshot, { scheduleCache: cache });
+    const offerings = enrichScheduleItemsWithAgenda(
+      matchingScheduleItems(cache, { term, courseCodes }),
+      snapshot
+    );
     const normalizedCodes = [...new Set(courseCodes.map((code) => String(code).toUpperCase()))];
     const present = new Set(offerings.map(({ courseCode }) => String(courseCode).toUpperCase()));
     const missing = normalizedCodes
@@ -2506,13 +2831,13 @@ export function createCampusService({
     const refreshCodes = [...new Set([...missing, ...staleCodes])];
     const job = refreshCodes.length > 0
       ? startScheduleSearch(
-          scheduleQuery({ courseCodes: refreshCodes }, snapshot),
+          scheduleQuery({ courseCodes: refreshCodes }, snapshot, { scheduleCache: cache }),
           { preferRegistrationPortal: registrationPortalExpected(snapshot) }
         )
       : null;
     if (job) await waitForJobDispatch(job);
     if (missing.length > 0) {
-      const query = scheduleQuery({ courseCodes: missing }, snapshot);
+      const query = scheduleQuery({ courseCodes: missing }, snapshot, { scheduleCache: cache });
       return envelope(
         snapshot,
         snapshot.generatedAt,

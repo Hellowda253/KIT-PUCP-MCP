@@ -31,8 +31,19 @@ export function searchableText(value = "") {
     .toLowerCase();
 }
 
+export function canonicalCourseDisplayName(name = "") {
+  const cleaned = cleanText(name);
+  const courseLabels = [...cleaned.matchAll(
+    /\b\d{4}-\d{1,2}\s+.*?\([^()]{1,80}\)/giu
+  )].map(([value]) => value.trim());
+  if (courseLabels.length > 0) return courseLabels.at(-1);
+  return cleaned
+    .replace(/^(?:el curso es destacado\s*)?(?:nombre del curso\s*)?/iu, "")
+    .trim();
+}
+
 export function normalizeCourseName(name = "") {
-  return cleanText(name)
+  return canonicalCourseDisplayName(name)
     .replace(/^\d{4}-\d+\s+/i, "")
     .replace(/\s+\([^)]+\)\s*$/g, "");
 }

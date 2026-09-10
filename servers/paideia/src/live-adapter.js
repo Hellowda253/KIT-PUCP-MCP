@@ -454,7 +454,6 @@ export function createLivePaideiaAdapter({
         "announcements",
         "grades"
       ];
-      const components = componentOrder.filter((component) => requested.has(component));
       const timings = {};
       const failures = [];
       const stage = async (name, operation) => {
@@ -466,42 +465,60 @@ export function createLivePaideiaAdapter({
         }
       };
       const areas = paideiaAreaDefinitions(config);
-      const collected = await stage("catalog", () =>
-        collectPaideiaAreaCourses(
-          areas,
-          async (area) => {
-            if (area.required) return loadTimelineCatalog(page, area, policy);
-            const cooldownUntil = areaCooldowns.get(area.id) ?? 0;
-            if (
-              options.retryUnavailableAreas !== true &&
-              cooldownUntil > epochNow()
-            ) {
-              throw paideiaError(
-                "area_cooldown",
-                "Optional Paideia area is temporarily in cooldown"
-              );
-            }
-            const areaPage = await context.newPage();
-            try {
-              await openAuthenticatedDashboard(
-                areaPage,
-                `${area.baseUrl}/my/courses.php`,
-                config,
-                policy
-              );
-              areaCooldowns.delete(area.id);
-              // Await inside the try so the finally block cannot close the
-              // area page while its timeline AJAX request is still running.
-              return await loadTimelineCatalog(areaPage, area, policy);
-            } catch (error) {
-              areaCooldowns.set(area.id, epochNow() + continuingCooldownMs);
-              throw error;
-            } finally {
-              await areaPage.close().catch(() => {});
-            }
+      let reusableCourse = null;
+      if (options.reuseCatalog === true && options.course && options.previousSnapshot?.courses) {
+        try {
+          reusableCourse = resolveCourse(options.previousSnapshot.courses, options.course);
+        } catch {
+          reusableCourse = null;
+        }
+      }
+      const reuseCatalog = Boolean(reusableCourse);
+      const components = componentOrder
+        .filter((component) => requested.has(component))
+        .filter((component) => component !== "catalog" || !reuseCatalog);
+      const collected = reuseCatalog
+        ? {
+            courses: options.previousSnapshot.courses,
+            areaStates: options.previousSnapshot.areaStates ?? []
           }
-        )
-      );
+        : await stage("catalog", () =>
+            collectPaideiaAreaCourses(
+              areas,
+              async (area) => {
+                if (area.required) return loadTimelineCatalog(page, area, policy);
+                const cooldownUntil = areaCooldowns.get(area.id) ?? 0;
+                if (
+                  options.retryUnavailableAreas !== true &&
+                  cooldownUntil > epochNow()
+                ) {
+                  throw paideiaError(
+                    "area_cooldown",
+                    "Optional Paideia area is temporarily in cooldown"
+                  );
+                }
+                const areaPage = await context.newPage();
+                try {
+                  await openAuthenticatedDashboard(
+                    areaPage,
+                    `${area.baseUrl}/my/courses.php`,
+                    config,
+                    policy
+                  );
+                  areaCooldowns.delete(area.id);
+                  // Await inside the try so the finally block cannot close the
+                  // area page while its timeline AJAX request is still running.
+                  return await loadTimelineCatalog(areaPage, area, policy);
+                } catch (error) {
+                  areaCooldowns.set(area.id, epochNow() + continuingCooldownMs);
+                  throw error;
+                } finally {
+                  await areaPage.close().catch(() => {});
+                }
+              }
+            )
+          );
+      if (reuseCatalog) timings.catalogMs = 0;
       const courses = collected.courses;
       const areaStates = collected.areaStates.map((entry) => {
         const cooldownUntil = areaCooldowns.get(entry.area) ?? 0;

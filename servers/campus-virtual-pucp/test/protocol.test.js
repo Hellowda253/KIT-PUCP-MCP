@@ -110,6 +110,36 @@ test("optimized enrollment schemas keep consolidated capabilities", () => {
   assert.ok(details.inputSchema.properties.schedule);
 });
 
+test("schedule references accept Campus labels and tools forbid inferred exam dates", () => {
+  const service = new Proxy({}, { get: () => async () => ({}) });
+  const tools = createCampusTools(service);
+  const details = tools.find(({ name }) => name === "get_course_schedule_details");
+  const evaluate = tools.find(({ name }) => name === "evaluate_course_schedule");
+  const recommend = tools.find(({ name }) => name === "recommend_course_schedules");
+
+  assert.ok(details.inputSchema.properties.schedule.maxLength >= 80);
+  assert.ok(
+    evaluate.inputSchema.properties.selections.items.properties.scheduleId.maxLength >= 80
+  );
+  assert.match(`${evaluate.description} ${recommend.description}`, /do not infer.*exam date/iu);
+  assert.match(`${evaluate.description} ${recommend.description}`, /date not published/iu);
+});
+
+test("partial grade statistics expose an explicit student, schedule, or all scope", () => {
+  const service = new Proxy({}, { get: () => async () => ({}) });
+  const tools = createCampusTools(service);
+  const partial = tools.find((candidate) => candidate.name === "get_partial_grade_statistics");
+  assert.deepEqual(partial.inputSchema.properties.scope.enum, [
+    "student_schedule",
+    "schedule",
+    "all"
+  ]);
+  assert.equal(partial.inputSchema.properties.scope.default, "student_schedule");
+  assert.match(partial.description, /all.*Campus.*Todos/iu);
+  const final = tools.find((candidate) => candidate.name === "get_final_grade_statistics");
+  assert.equal(final.inputSchema.properties.scope, undefined);
+});
+
 test("Campus tool guidance distinguishes dated agenda, weekly schedule, and curriculum status", () => {
   const service = new Proxy({}, { get: () => async () => ({}) });
   const tools = createCampusTools(service);

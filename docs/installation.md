@@ -19,6 +19,20 @@ Las skills se instalan copiando sus carpetas completas de forma recursiva, no
 solamente `SKILL.md`. Así también quedan disponibles sus `assets/`, referencias,
 scripts y plantillas HTML en cualquier cliente compatible.
 
+El repositorio incluye un comando explícito para evitar que la copia instalada se
+desactualice. Primero permite revisar el destino sin modificarlo y luego aplicar la
+sincronización de forma consciente:
+
+```powershell
+npm run sync-skills -- --target codex --dry-run
+npm run sync-skills -- --target codex --force
+npm run sync-skills -- --target antigravity --dry-run
+npm run sync-skills -- --target antigravity --force
+```
+
+También se admite `--destination C:\ruta\skills` para otros clientes. El comando no
+borra archivos adicionales y no sobrescribe diferencias sin `--force`.
+
 ### Biblioteca académica opcional
 
 Durante la instalación, el agente puede ofrecer una sola vez configurar una carpeta
@@ -99,7 +113,7 @@ Luego cambia a la etiqueta elegida, reinstala exactamente el lockfile y verifica
 
 ```powershell
 git fetch --tags
-git checkout v0.3.1
+git checkout v0.4.0
 npm ci
 npm test
 npm run doctor

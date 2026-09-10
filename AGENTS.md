@@ -22,8 +22,10 @@ y Claude Desktop en Windows; para otro cliente, usa su formato MCP `stdio` vigen
    cambiarla. Conserva todos los servidores ajenos y combina únicamente `paideia`,
    `campus_virtual_pucp` y `pucp_academic_overview`.
 9. Instala las carpetas completas de `skills/` de forma recursiva, incluidos
-   `assets/`, `references/`, `scripts/` y `agents/`, con el mecanismo admitido por
-   el cliente. No sustituyas silenciosamente una versión más nueva.
+   `assets/`, `references/`, `scripts/` y `agents/`. Para Codex o Antigravity usa
+   primero `npm run sync-skills -- --target CLIENTE --dry-run` y, tras revisar el
+   resultado, repite con `--force`. Para otro cliente usa `--destination` con su
+   ruta de skills. El comando no elimina archivos adicionales.
 10. Ejecuta `npm run doctor -- --json`; después verifica `initialize` y `tools/list`
    desde el cliente.
 11. Informa archivos modificados, pruebas realizadas y reversión disponible sin

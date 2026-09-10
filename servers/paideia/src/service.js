@@ -16,7 +16,7 @@ import {
   courseDestination,
   validateDownloadDestination
 } from "./downloads.js";
-import { searchableText } from "./text.js";
+import { canonicalCourseDisplayName, searchableText } from "./text.js";
 
 const SOURCE = "paideia";
 const EMPTY = Object.freeze({
@@ -523,7 +523,12 @@ export function createPaideiaService({
     };
     await writeJsonAtomic(cachePath, normalized);
     const history = await recordSync(jobId, previous, normalized);
-    return { snapshot: normalized, scraped, components, history };
+    return {
+      snapshot: normalized,
+      scraped,
+      components: scraped.coverage?.components ?? components,
+      history
+    };
   }
 
   function startSync(options = {}) {
@@ -573,7 +578,8 @@ export function createPaideiaService({
 
   async function query(options, select, {
     ttlSeconds = TTL_SECONDS.academic,
-    components = SYNC_COMPONENTS
+    components = SYNC_COMPONENTS,
+    pendingWhenEmpty = false
   } = {}) {
     const snapshot = await readSnapshot();
     const normalizedComponents = syncComponents({ components });
@@ -591,16 +597,28 @@ export function createPaideiaService({
       ? startSync({
           reason: options.forceRefresh ? "forced" : "stale",
           components: normalizedComponents,
+          ...(courseId ? { reuseCatalog: true } : {}),
           ...(courseId ? { course: courseId } : {})
         })
       : null;
     const data = await select(snapshot);
-    if (job) data.refreshJobId = job.jobId;
+    const incomplete = typeof pendingWhenEmpty === "function"
+      ? Boolean(pendingWhenEmpty(data))
+      : Boolean(pendingWhenEmpty && Number(data.count ?? 0) === 0);
+    if (job) {
+      data.refreshJobId = job.jobId;
+      if (incomplete) {
+        data.state = "pending";
+        data.incomplete = true;
+      }
+    }
     return envelope(snapshot, data, {
       ttlSeconds,
       generatedAt,
       warnings: job
-        ? ["Cached data was returned while a Paideia metadata refresh runs in the background."]
+        ? incomplete
+          ? ["No cached matching data is available; a focused Paideia refresh is running. Wait with get_paideia_job_status and repeat the original query after completion."]
+          : ["Cached data was returned while a Paideia metadata refresh runs in the background."]
         : []
     });
   }
@@ -647,26 +665,40 @@ export function createPaideiaService({
       );
       const maxSections = clamp(options.maxSections, 12, 60);
       const sampleLimit = clamp(options.sampleLimit, 5, 20);
-      const allSections = course.sections ?? [];
-      const sections = allSections.slice(0, maxSections).map((section) => ({
+      const rawSections = course.sections ?? [];
+      const materialized = rawSections.map((section) => ({
         ...section,
-        activities: snapshot.activities
-          .filter((item) =>
-            item.courseId === course.id &&
-            (section.activityIds?.includes(item.id) || item.section === section.title)
-          )
-          .slice(0, sampleLimit)
+        activities: snapshot.activities.filter((item) =>
+          item.courseId === course.id &&
+          (section.activityIds?.includes(item.id) || item.section === section.title)
+        )
+      }));
+      const visibleSections = options.includeEmptySections === true
+        ? materialized
+        : materialized.filter((section) => !(
+            searchableText(section.title) === "sin seccion" &&
+            section.activities.length === 0
+          ));
+      const sections = visibleSections.slice(0, maxSections).map((section) => ({
+        ...section,
+        activities: section.activities.slice(0, sampleLimit)
       }));
       return {
         course: {
           ...course,
+          name: canonicalCourseDisplayName(course.name),
           sections,
           returnedSectionCount: sections.length,
-          sectionCount: allSections.length,
-          truncated: allSections.length > sections.length
+          sectionCount: visibleSections.length,
+          rawSectionCount: rawSections.length,
+          omittedEmptySectionCount: rawSections.length - visibleSections.length,
+          truncated: visibleSections.length > sections.length
         }
       };
-    }, { components: SYNC_SCOPES.materials });
+    }, {
+      components: SYNC_SCOPES.materials,
+      pendingWhenEmpty: (data) => Number(data.course?.sectionCount ?? 0) === 0
+    });
   }
 
   async function listActivities(options = {}) {
@@ -787,7 +819,8 @@ export function createPaideiaService({
       return { count: items.length, items };
     }, {
       ttlSeconds: TTL_SECONDS.materialAdmin,
-      components: SYNC_SCOPES.materials
+      components: SYNC_SCOPES.materials,
+      pendingWhenEmpty: true
     });
   }
 

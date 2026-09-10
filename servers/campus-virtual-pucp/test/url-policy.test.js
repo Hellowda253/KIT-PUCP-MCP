@@ -61,6 +61,15 @@ test("grade statistics POSTs are limited to the two exact read-only forms", () =
   );
   assert.doesNotThrow(() =>
     policy.assertLegacyReadQuery(
+      "https://campus.example.edu/pucp/estadist/eswnotpa/eswnotpa",
+      {
+        body:
+          "clavecurso=IEE272&Horario=&cicloano=2026&ciclo=01&TipoCiclo=00&comision=&tipoevalu=Ex&numeroeval=2&TipoHorario=&accion=Espera"
+      }
+    )
+  );
+  assert.doesNotThrow(() =>
+    policy.assertLegacyReadQuery(
       "https://campus.example.edu/pucp/estadist/eswnotfi/eswnotfi",
       {
         body:
@@ -71,7 +80,8 @@ test("grade statistics POSTs are limited to the two exact read-only forms", () =
   for (const body of [
     "accion=Guardar&clavecurso=IEE272",
     "accion=Dibuja&clavecurso=IEE272&token=secret",
-    "accion=Dibuja&clavecurso=IEE272&numeroeval=0"
+    "accion=Dibuja&clavecurso=IEE272&numeroeval=0",
+    "clavecurso=IEE272&Horario=0831&cicloano=2026&ciclo=01&TipoCiclo=00&comision=&tipoevalu=Ex&numeroeval=2&TipoHorario=&accion=Espera"
   ]) {
     assert.throws(
       () =>

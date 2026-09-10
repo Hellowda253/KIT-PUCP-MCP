@@ -1,6 +1,6 @@
 {
   "name": "recommend_course_schedules",
-  "description": "Generate and rank active-term schedules after grouping every class, practice, laboratory, and exam belonging to each selected schedule. Incomplete component evidence is rejected rather than reported as conflict-free; never enrolls or controls the Campus generator.",
+  "description": "Generate and rank active-term schedules after grouping every class, practice, laboratory, and exam belonging to each selected schedule. Incomplete component evidence is rejected rather than reported as conflict-free. When the catalog only publishes an exam weekday and time, report Date not published and do not infer an exam date. Never enrolls or controls the Campus generator.",
   "parameters": {
     "type": "object",
     "properties": {

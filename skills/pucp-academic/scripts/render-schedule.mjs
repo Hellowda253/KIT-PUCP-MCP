@@ -4,6 +4,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { prepareScheduleDisplayData } from "./schedule-display.mjs";
+import { prepareScheduleSourceData } from "./schedule-source.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TEMPLATE = path.resolve(SCRIPT_DIR, "../assets/horario-pucp.html");
@@ -30,20 +31,136 @@ function courseEvidence(course) {
   };
 }
 
+const EXAM_TYPES = new Set(["partial", "final", "unknown"]);
+const EXAM_STATUSES = new Set(["published", "schedule_only", "not_published", "unknown"]);
+
+function sessionRooms(session) {
+  return [...new Set([
+    ...(Array.isArray(session?.rooms) ? session.rooms : []),
+    session?.room
+  ].map((room) => String(room ?? "").trim()).filter(Boolean))];
+}
+
+export function mergeExamRoomSessions(sessions = []) {
+  const merged = [];
+  const examIndexes = new Map();
+  for (const session of sessions) {
+    if (session?.type !== "exam") {
+      merged.push(session);
+      continue;
+    }
+    const identity = JSON.stringify([
+      session.examType ?? "",
+      session.date ?? "",
+      session.day ?? "",
+      session.start ?? "",
+      session.end ?? "",
+      session.scheduleId ?? "",
+      ...(session.courseCodes ?? []).map((code) => String(code).trim().toUpperCase()).sort()
+    ]);
+    const rooms = sessionRooms(session);
+    const existingIndex = examIndexes.get(identity);
+    if (existingIndex === undefined) {
+      examIndexes.set(identity, merged.length);
+      merged.push({
+        ...session,
+        ...(rooms.length > 0 ? { room: rooms.join(", "), rooms } : {})
+      });
+      continue;
+    }
+    const existing = merged[existingIndex];
+    const combinedRooms = [...new Set([...sessionRooms(existing), ...rooms])];
+    merged[existingIndex] = {
+      ...existing,
+      ...(combinedRooms.length > 0
+        ? { room: combinedRooms.join(", "), rooms: combinedRooms }
+        : {})
+    };
+  }
+  return merged;
+}
+
+function examDateParts(value) {
+  const match = String(value ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) return null;
+  return { weekday: date.getUTCDay() || 7 };
+}
+
+function validateExamMetadata(sessions) {
+  const seen = new Set();
+  for (const session of sessions.filter(({ type }) => type === "exam")) {
+    const parts = examDateParts(session.date);
+    const datePrecision = session.datePrecision ?? (parts ? "exact_date" : null);
+    const weekdayOnly = datePrecision === "weekday_time_only" && !session.date;
+    if (!EXAM_TYPES.has(session.examType) || (!parts && !weekdayOnly)) {
+      throw validationError(
+        "schedule_exam_metadata_required",
+        "Every exam session requires examType and either a valid ISO date or datePrecision=weekday_time_only when the Campus schedule catalog publishes only weekday and time.",
+        { session }
+      );
+    }
+    if (parts && datePrecision === "weekday_time_only") {
+      throw validationError(
+        "schedule_exam_metadata_conflict",
+        `Exam ${session.date} has an exact date but is marked weekday_time_only.`,
+        { session }
+      );
+    }
+    if (parts && parts.weekday !== session.day) {
+      throw validationError(
+        "schedule_exam_date_day_mismatch",
+        `Exam date ${session.date} does not match day ${session.day}.`,
+        { session }
+      );
+    }
+    const identity = [
+      session.examType,
+      session.date,
+      datePrecision,
+      session.day,
+      session.start,
+      session.end,
+      session.room ?? "",
+      ...(session.courseCodes ?? []).map((code) => String(code).trim().toUpperCase()).sort()
+    ].join("|");
+    if (seen.has(identity)) {
+      throw validationError(
+        "schedule_exam_duplicate",
+        `Duplicate exam session: ${session.date} ${session.start}-${session.end}.`,
+        { session }
+      );
+    }
+    seen.add(identity);
+  }
+}
+
 export function validateDeclaredExamSessions(data) {
-  const coursesWithExamSessions = new Set(
-    data.sessions
-      .filter((session) => session?.type === "exam")
-      .flatMap((session) => Array.isArray(session.courseCodes) ? session.courseCodes : [])
-      .map((code) => String(code).trim().toLocaleUpperCase("es-PE"))
-      .filter(Boolean)
-  );
+  validateExamMetadata(data.sessions ?? []);
+  const examSessionsByCourse = new Map();
+  for (const session of data.sessions.filter((item) => item?.type === "exam")) {
+    for (const code of Array.isArray(session.courseCodes) ? session.courseCodes : []) {
+      const normalized = String(code).trim().toLocaleUpperCase("es-PE");
+      if (!normalized) continue;
+      if (!examSessionsByCourse.has(normalized)) examSessionsByCourse.set(normalized, []);
+      examSessionsByCourse.get(normalized).push(session);
+    }
+  }
   const missing = [];
   for (const course of data.courses) {
     const evidence = courseEvidence(course);
     if (!evidence.courseCode) continue;
     const normalizedCode = evidence.courseCode.toLocaleUpperCase("es-PE");
-    const hasExamSession = coursesWithExamSessions.has(normalizedCode);
+    const courseExamSessions = examSessionsByCourse.get(normalizedCode) ?? [];
+    const hasExamSession = courseExamSessions.length > 0;
     const hasExamText = declaresExams(course?.exams);
     const status = course?.examStatus;
 
@@ -59,7 +176,7 @@ export function validateDeclaredExamSessions(data) {
       continue;
     }
 
-    if (!new Set(["published", "not_published", "unknown"]).has(status)) {
+    if (!EXAM_STATUSES.has(status)) {
       throw validationError(
         "schedule_exam_status_invalid",
         `Invalid examStatus for ${evidence.courseCode}: ${status}`,
@@ -83,6 +200,24 @@ export function validateDeclaredExamSessions(data) {
       }
       continue;
     }
+    if (status === "schedule_only") {
+      if (courseExamSessions.some((session) => session.datePrecision !== "weekday_time_only" || session.date)) {
+        throw validationError(
+          "schedule_exam_status_conflict",
+          `Course ${evidence.courseCode} is marked schedule_only but contains an exact dated exam. Use published for exact Campus dates.`,
+          { courseCode: evidence.courseCode, scheduleId: evidence.scheduleId }
+        );
+      }
+      if (!hasExamText || !hasExamSession) missing.push(evidence);
+      continue;
+    }
+    if (courseExamSessions.some((session) => session.datePrecision === "weekday_time_only" && !session.date)) {
+      throw validationError(
+        "schedule_exam_status_conflict",
+        `Course ${evidence.courseCode} has only weekday/time exam evidence. Use examStatus=schedule_only instead of published.`,
+        { courseCode: evidence.courseCode, scheduleId: evidence.scheduleId }
+      );
+    }
     if (!hasExamText || !hasExamSession) missing.push(evidence);
   }
   if (missing.length > 0) {
@@ -99,6 +234,7 @@ function normalizeData(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw new TypeError("Schedule data must be a JSON object");
   }
+  data = prepareScheduleSourceData(data);
   if (!Array.isArray(data.courses) || !Array.isArray(data.sessions)) {
     throw new TypeError("Schedule data must contain courses and sessions arrays");
   }
@@ -107,11 +243,12 @@ function normalizeData(data) {
     throw new TypeError("Schedule credits must be a non-negative number");
   }
   validateDeclaredExamSessions(data);
+  const sessions = mergeExamRoomSessions(data.sessions);
   return prepareScheduleDisplayData({
     term: String(data.term ?? ""),
     credits,
     courses: data.courses,
-    sessions: data.sessions
+    sessions
   });
 }
 
@@ -152,14 +289,19 @@ function option(args, name) {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
+export function defaultScheduleOutputPath(data, cwd = process.cwd()) {
+  const term = String(prepareScheduleSourceData(data).term ?? "PUCP").replace(/[^0-9A-Za-z-]/gu, "");
+  return path.resolve(cwd, "Horarios_PUCP", `Horario_PUCP_${term || "PUCP"}.html`);
+}
+
 async function main(args) {
   const dataPath = option(args, "--data");
-  const outputPath = option(args, "--output");
   const templatePath = option(args, "--template") ?? DEFAULT_TEMPLATE;
-  if (!dataPath || !outputPath) {
-    throw new Error("Usage: render-schedule.mjs --data schedule.json --output horario.html [--template template.html] [--force]");
+  if (!dataPath) {
+    throw new Error("Usage: render-schedule.mjs --data schedule.json [--output horario.html] [--template template.html] [--force]");
   }
   const data = JSON.parse(await readFile(path.resolve(dataPath), "utf8"));
+  const outputPath = option(args, "--output") ?? defaultScheduleOutputPath(data);
   const rendered = await renderScheduleTemplate({
     data,
     outputPath: path.resolve(outputPath),

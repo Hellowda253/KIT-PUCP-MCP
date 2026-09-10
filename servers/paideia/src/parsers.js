@@ -1,4 +1,9 @@
-import { cleanText, extractDue, normalizeCourseName } from "./text.js";
+import {
+  canonicalCourseDisplayName,
+  cleanText,
+  extractDue,
+  normalizeCourseName
+} from "./text.js";
 
 function absoluteUrl(value, baseUrl) {
   try {
@@ -81,7 +86,7 @@ export function parseDashboardHtml(html, baseUrl, { area } = {}) {
   const pattern = /<a\b([^>]*href=["'][^"']*\/course\/view\.php\?[^"']*\bid=\d+[^"']*["'][^>]*)>([\s\S]*?)<\/a>/gi;
   for (const match of String(html).matchAll(pattern)) {
     const url = absoluteUrl(attribute(match[1], "href"), baseUrl);
-    const name = cleanText(match[2]);
+    const name = canonicalCourseDisplayName(match[2]);
     const sourceId = idFromUrl(url);
     if (sourceId && name) {
       const course = {

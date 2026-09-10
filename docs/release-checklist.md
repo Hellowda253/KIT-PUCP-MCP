@@ -7,7 +7,7 @@ Antes de crear una versión pública:
 2. Ejecuta `npm ci`, `npm test` y `npm run doctor` en un clon limpio.
 3. Revisa `git diff --cached` buscando credenciales, cookies, identificadores y
    rutas personales.
-4. Publica primero la rama predeterminada y crea la etiqueta `v0.3.1` sobre el
+4. Publica primero la rama predeterminada y crea la etiqueta `v0.4.0` sobre el
    commit verificado.
 5. Comprueba la instalación desde la URL pública con las instrucciones de
    `AGENTS.md` en al menos un cliente compatible.

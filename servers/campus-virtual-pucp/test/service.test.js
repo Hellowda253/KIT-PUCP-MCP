@@ -346,6 +346,92 @@ test("academic week guard is a fallback and forceProbe bypasses it", async () =>
   assert.equal(forced.data.source, "enrollment_portal");
 });
 
+test("academic week guard resolves an ambiguous term through an enrolled course", async () => {
+  const noEnrollmentDates = structuredClone(snapshot);
+  noEnrollmentDates.modules.enrollment_calendar = {
+    state: "unavailable",
+    generatedAt,
+    items: [],
+    reason: "not_visible"
+  };
+  noEnrollmentDates.modules.enrolled_courses.items = [{
+    code: "1IND52",
+    name: "Diseño de la cadena de suministros y operaciones",
+    term: "2026-2",
+    schedule: "0732",
+    status: "Matriculado"
+  }];
+  const calendarQueries = [];
+  let probes = 0;
+  const { service } = await setup({
+    snapshot: noEnrollmentDates,
+    now: () => "2026-09-08T15:00:00.000Z",
+    academicCalendarContext: async (query) => {
+      calendarQueries.push(query);
+      return query.course === "1IND52"
+        ? {
+            state: "available",
+            term: "2026-2",
+            currentWeek: 4,
+            currentDate: "2026-09-08",
+            calendarId: "fci-2026-2"
+          }
+        : { state: "calendar_ambiguous", term: "2026-2", currentWeek: null };
+    },
+    adapter: {
+      async readRegistrationWorkspace() {
+        probes += 1;
+        throw new Error("the course-scoped calendar guard should prevent this probe");
+      }
+    }
+  });
+
+  const result = await service.getRegistrationStatus();
+
+  assert.equal(probes, 0);
+  assert.equal(result.data.reason, "outside_registration_window");
+  assert.equal(result.data.source, "academic_calendar_guard");
+  assert.equal(result.data.academicContext.currentWeek, 4);
+  assert.deepEqual(calendarQueries, [{ term: "2026-2" }, { term: "2026-2", course: "1IND52" }]);
+});
+
+test("schedule details skip live enrollment after course-scoped calendar guard closes it", async () => {
+  const noEnrollmentDates = structuredClone(snapshot);
+  noEnrollmentDates.modules.enrollment_calendar = {
+    state: "unavailable",
+    generatedAt,
+    items: [],
+    reason: "not_visible"
+  };
+  noEnrollmentDates.modules.enrolled_courses.items = [{
+    code: "1IND50",
+    name: "Gestión del talento humano",
+    term: "2026-2",
+    schedule: "0831",
+    status: "Matriculado"
+  }];
+  let probes = 0;
+  const { service } = await setup({
+    snapshot: noEnrollmentDates,
+    now: () => "2026-09-08T15:00:00.000Z",
+    academicCalendarContext: async (query) => query.course
+      ? { state: "available", term: "2026-2", currentWeek: 4, currentDate: "2026-09-08", calendarId: "fci-2026-2" }
+      : { state: "calendar_ambiguous", term: "2026-2", currentWeek: null },
+    adapter: {
+      async readRegistrationWorkspace() {
+        probes += 1;
+        throw new Error("the calendar guard should prevent live capacity enrichment");
+      }
+    }
+  });
+
+  const result = await service.getCourseScheduleDetails({ course: "1IND50", schedule: "0831" });
+
+  assert.equal(probes, 0);
+  assert.equal(result.data.state, "available");
+  assert.equal(result.data.item.scheduleId, "0831");
+});
+
 test("an explicitly active enrollment window overrides the academic week fallback", async () => {
   const exceptionalWindow = structuredClone(snapshot);
   exceptionalWindow.modules.enrollment_calendar.items = [{
@@ -786,6 +872,36 @@ test("current schedule search derives the active term and uses the registration 
   assert.deepEqual(result.data.sourcesUsed, ["enrollment_portal"]);
   assert.equal(result.data.activeTerm, "2026-2");
   assert.equal(result.data.enrollmentMode, "extemporaneous");
+});
+
+test("current schedule search recovers the active term from its own last good cache", async () => {
+  const degraded = structuredClone(snapshot);
+  for (const key of ["agenda", "student_schedule", "enrolled_courses", "enrollment"]) {
+    degraded.modules[key] = { state: "unavailable", reason: "role_unavailable", items: [] };
+  }
+  const query = {
+    mode: "current", term: "2026-2", courseCodes: ["CUR100"],
+    courseName: "", academicScope: null
+  };
+  const rows = [{
+    courseCode: "CUR100", courseName: "Curso", term: "2026-2", scheduleId: "0101",
+    scheduleType: "class", associatedScheduleIds: [],
+    sessions: [{ day: "monday", start: "08:00", end: "10:00", kind: "class", room: "A101" }]
+  }];
+  const { service } = await setup({
+    snapshot: degraded,
+    now: () => generatedAt,
+    scheduleCache: { entries: [{
+      generatedAt, retrievedAt: generatedAt, activeTerm: "2026-2",
+      query, state: "available", source: "schedule_catalog", items: rows
+    }] }
+  });
+
+  const result = await service.searchCourseSchedules({ courseCodes: ["CUR100"] });
+
+  assert.equal(result.data.state, "available");
+  assert.equal(result.data.activeTerm, "2026-2");
+  assert.equal(result.data.items[0].courseCode, "CUR100");
 });
 
 test("current schedule search skips the registration portal after the published window ended", async () => {
@@ -1271,6 +1387,483 @@ test("partially covered agenda range returns only overlapping cache with a warni
   await service.waitForIdle();
 });
 
+test("narrow agenda refresh merges coverage and preserves previously cached dates", async () => {
+  const broad = structuredClone(snapshot);
+  broad.generatedAt = "2026-09-08T12:00:00.000Z";
+  broad.retrievedAt = broad.generatedAt;
+  broad.modules.agenda = {
+    state: "available",
+    generatedAt: broad.generatedAt,
+    range: { start: "2026-09-01", end: "2026-12-07" },
+    items: [
+      { id: "sep", beginDate: "2026-09-08", beginTime: "08:00", title: "Clase de septiembre" },
+      { id: "dec7", beginDate: "2026-12-07", beginTime: "10:00", title: "Actividad de diciembre" }
+    ]
+  };
+  const refreshed = {
+    generatedAt: "2026-09-08T13:00:00.000Z",
+    retrievedAt: "2026-09-08T13:00:00.000Z",
+    modules: {
+      agenda: {
+        state: "available",
+        generatedAt: "2026-09-08T13:00:00.000Z",
+        range: { start: "2026-12-11", end: "2026-12-11" },
+        items: [{ id: "dec11", beginDate: "2026-12-11", beginTime: "08:00", title: "Examen final" }]
+      }
+    }
+  };
+  let syncs = 0;
+  const { service, cachePath } = await setup({
+    snapshot: broad,
+    now: () => "2026-09-08T13:00:00.000Z",
+    adapter: {
+      async sync() {
+        syncs += 1;
+        return refreshed;
+      }
+    }
+  });
+
+  await service.syncCampusVirtual({ start: "2026-12-11", end: "2026-12-11" });
+  await service.waitForIdle();
+
+  const cached = JSON.parse(await readFile(cachePath, "utf8"));
+  assert.deepEqual(cached.modules.agenda.items.map(({ id }) => id), ["sep", "dec7", "dec11"]);
+  assert.deepEqual(cached.modules.agenda.ranges, [
+    { start: "2026-09-01", end: "2026-12-07" },
+    { start: "2026-12-11", end: "2026-12-11" }
+  ]);
+  const september = await service.getCampusAgenda({ start: "2026-09-08", end: "2026-09-08" });
+  assert.equal(september.data.state, "available");
+  assert.equal(september.data.authoritative, true);
+  assert.deepEqual(september.data.items.map(({ id }) => id), ["sep"]);
+  assert.equal(syncs, 1);
+});
+
+test("range-specific agenda refresh is transactional when Campus loses the authenticated role", async () => {
+  const degraded = {
+    generatedAt: "2026-09-10T02:03:55.000Z",
+    retrievedAt: "2026-09-10T02:03:55.000Z",
+    modules: Object.fromEntries(Object.keys(snapshot.modules).map((key) => [key, {
+      state: "unavailable",
+      reason: "role_unavailable",
+      items: []
+    }]))
+  };
+  let adapterInput;
+  const { service, cachePath } = await setup({
+    adapter: {
+      async sync(input) {
+        adapterInput = input;
+        return degraded;
+      }
+    }
+  });
+
+  const pending = await service.getCampusAgenda({
+    start: "2026-10-14",
+    end: "2026-10-14"
+  });
+  await service.waitForIdle();
+  const status = await service.getCampusJobStatus({ jobId: pending.data.refreshJobId });
+  const cached = JSON.parse(await readFile(cachePath, "utf8"));
+
+  assert.equal(status.data.status, "failed");
+  assert.equal(status.data.error.code, "campus_agenda_refresh_failed");
+  assert.equal(adapterInput.moduleScope, "agenda");
+  assert.equal(cached.modules.agenda.state, "available");
+  assert.equal(cached.modules.enrolled_courses.state, "available");
+  assert.equal(cached.modules.enrolled_courses.items.length, 1);
+});
+
+test("full Campus sync does not replace a useful snapshot with a broad role failure", async () => {
+  const degraded = {
+    generatedAt: "2026-09-10T02:06:02.000Z",
+    retrievedAt: "2026-09-10T02:06:02.000Z",
+    modules: Object.fromEntries(Object.keys(snapshot.modules).map((key) => [key, {
+      state: "unavailable",
+      reason: "role_unavailable",
+      items: []
+    }]))
+  };
+  const { service, cachePath } = await setup({
+    adapter: { async sync() { return degraded; } }
+  });
+
+  const queued = await service.syncCampusVirtual({});
+  await service.waitForIdle();
+  const status = await service.getCampusJobStatus({ jobId: queued.data.jobId });
+  const cached = JSON.parse(await readFile(cachePath, "utf8"));
+
+  assert.equal(status.data.status, "failed");
+  assert.equal(status.data.error.code, "campus_sync_degraded");
+  assert.equal(cached.modules.student_schedule?.state ?? "available", "available");
+  assert.equal(cached.modules.official_grades.state, "available");
+  assert.equal(cached.modules.official_grades.items[0].grade, "18");
+});
+
+test("agenda exam dates and types propagate through schedule lookup and local optimization", async () => {
+  const current = structuredClone(snapshot);
+  const timestamp = "2026-09-08T14:00:00.000Z";
+  current.generatedAt = timestamp;
+  current.retrievedAt = timestamp;
+  current.modules.enrollment_calendar.items = [];
+  current.modules.student_schedule = {
+    state: "available",
+    generatedAt: timestamp,
+    term: "2026-2",
+    items: [
+      { courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101", scheduleType: "exam", day: "friday", start: "08:00", end: "11:00", room: "A101" },
+      { courseCode: "OTR200", courseName: "Curso dos", term: "2026-2", scheduleId: "0201", scheduleType: "exam", day: "wednesday", start: "08:00", end: "11:00", room: "B201" }
+    ]
+  };
+  current.modules.agenda = {
+    state: "available",
+    generatedAt: timestamp,
+    range: { start: "2026-10-01", end: "2026-12-12" },
+    items: [
+      { id: "partial-cur", kind: "EXAMEN", code: "CUR100", course: "CURSO UNO", term: "2026-2", schedule: "0101", beginDate: "2026-10-14", endDate: "2026-10-14", beginTime: "08:00", endTime: "11:00" },
+      { id: "final-otr", kind: "EXAMEN", code: "OTR200", course: "CURSO DOS", term: "2026-2", schedule: "0201", beginDate: "2026-12-09", endDate: "2026-12-09", beginTime: "08:00", endTime: "11:00" }
+    ]
+  };
+  const rows = [
+    { courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101", scheduleType: "exam", associatedScheduleIds: [], sessions: [{ day: "friday", start: "08:00", end: "11:00", kind: "exam", room: "A101" }] },
+    { courseCode: "OTR200", courseName: "Curso dos", term: "2026-2", scheduleId: "0201", scheduleType: "exam", associatedScheduleIds: [], sessions: [{ day: "wednesday", start: "08:00", end: "11:00", kind: "exam", room: "B201" }] }
+  ];
+  const query = { mode: "current", term: "2026-2", courseCodes: ["CUR100", "OTR200"], courseName: "", academicScope: null };
+  const { service } = await setup({
+    snapshot: current,
+    now: () => timestamp,
+    scheduleCache: { entries: [{ generatedAt: timestamp, retrievedAt: timestamp, query, state: "available", items: rows }] }
+  });
+
+  const search = await service.searchCourseSchedules({ courseCodes: ["CUR100", "OTR200"] });
+  assert.deepEqual(search.data.items.map(({ sessions }) => [sessions[0].date, sessions[0].examType]), [
+    ["2026-10-14", "partial"],
+    ["2026-12-09", "final"]
+  ]);
+  const details = await service.getCourseScheduleDetails({ course: "CUR100", schedule: "0101" });
+  assert.equal(details.data.item.sessions[0].date, "2026-10-14");
+  assert.equal(details.data.item.sessions[0].examType, "partial");
+  assert.equal(details.data.item.sessions[0].day, "wednesday");
+  assert.equal(details.data.item.sessions[0].scheduleCatalogDay, "friday");
+  assert.equal(details.data.item.sessions[0].dayDiscrepancy, true);
+  const personal = await service.getStudentSchedule();
+  assert.deepEqual(personal.data.items.map(({ date, examType }) => [date, examType]), [
+    ["2026-10-14", "partial"],
+    ["2026-12-09", "final"]
+  ]);
+  const evaluated = await service.evaluateCourseSchedule({
+    selections: [
+      { courseCode: "CUR100", scheduleId: "0101" },
+      { courseCode: "OTR200", scheduleId: "0201" }
+    ]
+  });
+  assert.equal(evaluated.data.valid, true);
+  assert.equal(evaluated.data.conflicts.length, 0);
+  assert.deepEqual(evaluated.data.courses.map(({ sessions }) => sessions[0].date), ["2026-10-14", "2026-12-09"]);
+  const recommended = await service.recommendCourseSchedules({ courseCodes: ["CUR100", "OTR200"] });
+  assert.equal(recommended.data.recommendations.length, 1);
+  assert.deepEqual(
+    recommended.data.recommendations[0].courses.map(({ sessions }) => sessions[0].date),
+    ["2026-10-14", "2026-12-09"]
+  );
+});
+
+test("student schedule derives public items from consolidated enriched sessions", async () => {
+  const current = structuredClone(snapshot);
+  const timestamp = "2026-09-08T14:00:00.000Z";
+  current.generatedAt = timestamp;
+  current.retrievedAt = timestamp;
+  current.modules.student_schedule = {
+    state: "available",
+    generatedAt: timestamp,
+    term: "2026-2",
+    items: [
+      { courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101", scheduleType: "exam", day: "wednesday", start: "08:00", end: "09:00", room: "A101" },
+      { courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101", scheduleType: "exam", day: "wednesday", start: "09:00", end: "10:00", room: "A101" },
+      { courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101", scheduleType: "exam", day: "wednesday", start: "10:00", end: "11:00", room: "A101" }
+    ]
+  };
+  current.modules.agenda = {
+    state: "available",
+    generatedAt: timestamp,
+    range: { start: "2026-10-01", end: "2026-10-31" },
+    items: [{
+      id: "partial-cur", kind: "EXAMEN PARCIAL", code: "CUR100", course: "CURSO UNO",
+      term: "2026-2", schedule: "0101", beginDate: "2026-10-14", endDate: "2026-10-14",
+      beginTime: "08:00", endTime: "11:00", place: "A101"
+    }]
+  };
+  const query = { mode: "current", term: "2026-2", courseCodes: ["CUR100"], courseName: "", academicScope: null };
+  const rows = [{
+    courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101",
+    scheduleType: "exam", associatedScheduleIds: [], professor: "Docente Uno",
+    sessions: [{ day: "wednesday", start: "08:00", end: "11:00", kind: "exam", room: "A101" }]
+  }];
+  const { service } = await setup({
+    snapshot: current,
+    now: () => timestamp,
+    scheduleCache: { entries: [{ generatedAt: timestamp, retrievedAt: timestamp, query, state: "available", items: rows }] }
+  });
+
+  const result = await service.getStudentSchedule();
+
+  assert.equal(result.data.items.length, 1);
+  assert.deepEqual(
+    result.data.items.map(({ start, end, date, examType }) => ({ start, end, date, examType })),
+    [{ start: "08:00", end: "11:00", date: "2026-10-14", examType: "partial" }]
+  );
+  assert.deepEqual(result.data.items, result.data.courseDetails[0].sessions.map((session) => ({
+    courseCode: "CUR100",
+    courseName: "Curso uno",
+    term: "2026-2",
+    scheduleId: session.scheduleId,
+    scheduleType: session.kind,
+    professor: session.professor,
+    modality: session.modality ?? "",
+    enrichmentSource: "schedule_catalog",
+    ...session
+  })));
+});
+
+test("student schedule stays pending while its published exams need an uncovered agenda range", async () => {
+  const current = structuredClone(snapshot);
+  const timestamp = "2026-09-08T14:00:00.000Z";
+  current.generatedAt = timestamp;
+  current.retrievedAt = timestamp;
+  current.modules.student_schedule = {
+    state: "available", generatedAt: timestamp, term: "2026-2",
+    items: [{
+      courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101",
+      scheduleType: "class", day: "monday", start: "08:00", end: "10:00", room: "A101"
+    }]
+  };
+  current.modules.agenda = {
+    state: "available", generatedAt: timestamp,
+    range: { start: "2026-09-01", end: "2026-09-30" }, items: []
+  };
+  const query = { mode: "current", term: "2026-2", courseCodes: ["CUR100"], courseName: "", academicScope: null };
+  const rows = [
+    {
+      courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101",
+      scheduleType: "class", associatedScheduleIds: [],
+      sessions: [{ day: "monday", start: "08:00", end: "10:00", kind: "class", room: "A101" }]
+    },
+    {
+      courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101",
+      scheduleType: "exam", associatedScheduleIds: [],
+      sessions: [{ day: "wednesday", start: "08:00", end: "11:00", kind: "exam", room: "A102" }]
+    }
+  ];
+  const syncInputs = [];
+  const { service } = await setup({
+    snapshot: current,
+    now: () => timestamp,
+    scheduleCache: { entries: [{ generatedAt: timestamp, retrievedAt: timestamp, query, state: "available", items: rows }] },
+    academicCalendarContext: async () => ({
+      state: "available", term: "2026-2", startDate: "2026-08-17", endDate: "2026-12-12"
+    }),
+    adapter: {
+      async sync(input) {
+        syncInputs.push({ start: input.start, end: input.end, reason: input.reason });
+        return {
+          generatedAt: timestamp, retrievedAt: timestamp,
+          modules: {
+            agenda: {
+              state: "available", generatedAt: timestamp,
+              range: { start: input.start, end: input.end },
+              items: [{
+                id: "partial-cur", kind: "EXAMEN PARCIAL", code: "CUR100", course: "CURSO UNO",
+                term: "2026-2", schedule: "0101", beginDate: "2026-10-14", endDate: "2026-10-14",
+                beginTime: "08:00", endTime: "11:00", place: "A102"
+              }]
+            }
+          }
+        };
+      }
+    }
+  });
+
+  const pending = await service.getStudentSchedule();
+
+  assert.equal(pending.data.state, "pending_enrichment");
+  assert.equal(pending.data.answerReady, false);
+  assert.equal(pending.data.temporalCompleteness, "pending");
+  assert.equal(pending.data.missingExamDetails.length, 1);
+  assert.match(pending.data.refreshJobId, /^sync-/u);
+  await service.waitForIdle();
+  const complete = await service.getStudentSchedule();
+  assert.equal(complete.data.answerReady, true);
+  assert.equal(complete.data.temporalCompleteness, "complete");
+  assert.equal(complete.data.courseDetails[0].sessions.find(({ kind }) => kind === "exam").date, "2026-10-14");
+  assert.deepEqual(syncInputs, [{
+    start: "2026-08-17", end: "2026-12-12", reason: "schedule_exam_enrichment"
+  }]);
+});
+
+test("student schedule never reports answerReady when full-term evidence still lacks exam metadata", async () => {
+  const current = structuredClone(snapshot);
+  const timestamp = "2026-09-08T14:00:00.000Z";
+  current.generatedAt = timestamp;
+  current.retrievedAt = timestamp;
+  current.modules.student_schedule = {
+    state: "available", generatedAt: timestamp, term: "2026-2",
+    items: [{
+      courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101",
+      scheduleType: "class", day: "monday", start: "08:00", end: "10:00", room: "A101"
+    }]
+  };
+  current.modules.agenda = {
+    state: "available", generatedAt: timestamp,
+    range: { start: "2026-08-17", end: "2026-12-12" }, items: []
+  };
+  const query = { mode: "current", term: "2026-2", courseCodes: ["CUR100"], courseName: "", academicScope: null };
+  const rows = [{
+    courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101",
+    scheduleType: "class", associatedScheduleIds: [],
+    sessions: [{ day: "monday", start: "08:00", end: "10:00", kind: "class", room: "A101" }]
+  }, {
+    courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101",
+    scheduleType: "exam", associatedScheduleIds: [],
+    sessions: [{ day: "wednesday", start: "08:00", end: "11:00", kind: "exam", room: "A102" }]
+  }];
+  const { service } = await setup({
+    snapshot: current,
+    now: () => timestamp,
+    scheduleCache: { entries: [{ generatedAt: timestamp, retrievedAt: timestamp, query, state: "available", items: rows }] },
+    academicCalendarContext: async () => ({
+      state: "available", term: "2026-2", startDate: "2026-08-17", endDate: "2026-12-12"
+    })
+  });
+
+  const result = await service.getStudentSchedule();
+
+  assert.equal(result.data.state, "available_partial");
+  assert.equal(result.data.weeklyPatternReady, true);
+  assert.equal(result.data.answerReady, false);
+  assert.equal(result.data.temporalCompleteness, "partial");
+  assert.equal(result.data.refreshJobId, undefined);
+});
+
+test("single-day agenda refresh probes a one-day margin and returns only the requested date", async () => {
+  const current = structuredClone(snapshot);
+  const timestamp = "2026-09-08T14:00:00.000Z";
+  current.generatedAt = timestamp;
+  current.retrievedAt = timestamp;
+  current.modules.agenda = {
+    state: "available",
+    generatedAt: timestamp,
+    range: { start: "2026-10-14", end: "2026-10-14" },
+    items: []
+  };
+  const syncInputs = [];
+  const { service } = await setup({
+    snapshot: current,
+    now: () => timestamp,
+    adapter: {
+      async sync(input) {
+        syncInputs.push({ start: input.start, end: input.end });
+        return {
+          generatedAt: timestamp,
+          retrievedAt: timestamp,
+          modules: {
+            agenda: {
+              state: "available", generatedAt: timestamp,
+              range: { start: input.start, end: input.end },
+              items: [
+                { id: "before", beginDate: "2026-10-13", beginTime: "08:00", title: "Antes" },
+                { id: "target", beginDate: "2026-10-14", beginTime: "08:00", title: "Examen" },
+                { id: "after", beginDate: "2026-10-15", beginTime: "08:00", title: "Después" }
+              ]
+            }
+          }
+        };
+      }
+    }
+  });
+
+  await service.getCampusDay({ date: "2026-10-14", forceRefresh: true });
+  await service.waitForIdle();
+  const result = await service.getCampusDay({ date: "2026-10-14" });
+
+  assert.deepEqual(syncInputs, [{ start: "2026-10-13", end: "2026-10-15" }]);
+  assert.deepEqual(result.data.query, { start: "2026-10-14", end: "2026-10-14", course: "", kind: "" });
+  assert.deepEqual(result.data.items.map(({ id }) => id), ["target"]);
+});
+
+test("multiple rooms for the same agenda exam remain one academic session", async () => {
+  const current = structuredClone(snapshot);
+  const timestamp = "2026-09-08T14:00:00.000Z";
+  current.generatedAt = timestamp;
+  current.retrievedAt = timestamp;
+  current.modules.enrollment_calendar.items = [];
+  current.modules.student_schedule = {
+    state: "available",
+    generatedAt: timestamp,
+    term: "2026-2",
+    items: [
+      { courseCode: "CUR100", courseName: "Curso uno", term: "2026-2", scheduleId: "0101", scheduleType: "class", day: "monday", start: "08:00", end: "10:00", room: "A101" }
+    ]
+  };
+  current.modules.agenda = {
+    state: "available",
+    generatedAt: timestamp,
+    range: { start: "2026-10-01", end: "2026-12-12" },
+    items: [
+      { id: "partial-cur", kind: "EXAMEN", code: "CUR100", course: "CURSO UNO", term: "2026-2", schedule: "0101", beginDate: "2026-10-13", endDate: "2026-10-13", beginTime: "08:00", endTime: "11:00", place: "En las aulas A402, A607" }
+    ]
+  };
+  const rows = [
+    {
+      courseCode: "CUR100",
+      courseName: "Curso uno",
+      term: "2026-2",
+      scheduleId: "0101",
+      scheduleType: "class",
+      associatedScheduleIds: [],
+      sessions: [{ day: "monday", start: "08:00", end: "10:00", kind: "class", room: "A101" }]
+    },
+    {
+      courseCode: "CUR100",
+      courseName: "Curso uno",
+      term: "2026-2",
+      scheduleId: "0101",
+      scheduleType: "exam",
+      associatedScheduleIds: [],
+      sessions: [
+        { day: "tuesday", start: "08:00", end: "11:00", kind: "exam", room: "A402" },
+        { day: "tuesday", start: "08:00", end: "11:00", kind: "exam", room: "A607" },
+        { day: "friday", start: "08:00", end: "11:00", kind: "exam", room: "E309" }
+      ]
+    }
+  ];
+  const query = { mode: "current", term: "2026-2", courseCodes: ["CUR100"], courseName: "", academicScope: null };
+  const { service } = await setup({
+    snapshot: current,
+    now: () => timestamp,
+    scheduleCache: { entries: [{ generatedAt: timestamp, retrievedAt: timestamp, query, state: "available", items: rows }] }
+  });
+
+  const personal = await service.getStudentSchedule();
+  const exams = personal.data.courseDetails[0].sessions.filter(({ kind }) => kind === "exam");
+  assert.equal(exams.length, 2);
+  const publishedExam = exams.find(({ agendaEventId }) => agendaEventId === "partial-cur");
+  assert.deepEqual(publishedExam.rooms, ["A402", "A607"]);
+  assert.equal(publishedExam.room, "A402, A607");
+  assert.equal(exams.find(({ agendaEventId }) => !agendaEventId).day, "friday");
+
+  const search = await service.searchCourseSchedules({ courseCodes: ["CUR100"] });
+  const searchedExams = search.data.items.find(({ scheduleType }) => scheduleType === "exam").sessions;
+  assert.equal(searchedExams.length, 2);
+  assert.deepEqual(searchedExams.find(({ agendaEventId }) => agendaEventId === "partial-cur").rooms, ["A402", "A607"]);
+
+  const evaluated = await service.evaluateCourseSchedule({
+    selections: [{ courseCode: "CUR100", scheduleId: "0101" }]
+  });
+  assert.equal(evaluated.data.courses[0].sessions.filter(({ kind }) => kind === "exam").length, 2);
+});
+
 test("sync preserves last good structural failures, clears trusted empty modules, and keeps role-unavailable modules unavailable", async () => {
   const refreshed = structuredClone(snapshot);
   refreshed.generatedAt = "2026-07-24T11:00:00.000Z";
@@ -1503,6 +2096,100 @@ test("grade statistics resolve only cached institutional references and persist 
   });
   assert.equal(missing.data.state, "unavailable");
   assert.equal(missing.data.reason, "evaluation_not_found");
+});
+
+test("all grade statistics use the Campus Todos scope and a cache isolated from one schedule", async () => {
+  const withStatistics = structuredClone(snapshot);
+  const statistic = (schedule) => ({
+    courseCode: "1IND52",
+    course: "Diseño de la Cadena de Suministros y Operaciones",
+    item: "Práctica tipo B 1",
+    assessmentType: "Pb",
+    assessmentNumber: 1,
+    grade: "15",
+    status: "No oficial",
+    term: "2026-2",
+    statistics: {
+      kind: "partial",
+      courseCode: "1IND52",
+      year: "2026",
+      cycle: "02",
+      cycleType: "00",
+      evaluationType: "Pb",
+      evaluationNumber: 1,
+      schedule,
+      commission: ""
+    }
+  });
+  withStatistics.modules.official_grades.items = [statistic("0732"), statistic("0733")];
+  const calls = [];
+  const { service } = await setup({
+    snapshot: withStatistics,
+    adapter: {
+      async getPartialGradeStatistics(reference) {
+        calls.push(reference);
+        return {
+          state: "available",
+          course: "DISEÑO DE LA CADENA DE SUMINISTROS Y OPERACIONES",
+          term: "2026-2",
+          schedule: reference.statisticsScope === "all" ? "Todos" : reference.schedule,
+          summary: { count: 80, mean: 14, median: 14 },
+          distribution: [],
+          noteTypes: []
+        };
+      }
+    }
+  });
+
+  const allPending = await service.getPartialGradeStatistics({
+    course: "1IND52",
+    term: "2026-2",
+    evaluationType: "Pb",
+    evaluationNumber: 1,
+    scope: "all"
+  });
+  assert.equal(allPending.data.state, "pending");
+  await service.waitForIdle();
+  const allResult = await service.getPartialGradeStatistics({
+    course: "1IND52",
+    term: "2026-2",
+    evaluationType: "Pb",
+    evaluationNumber: 1,
+    scope: "all"
+  });
+  assert.equal(calls[0].statisticsScope, "all");
+  assert.deepEqual(allResult.data.scope, {
+    requested: "all",
+    resolved: "all",
+    requestedSchedule: null,
+    resolvedSchedule: null,
+    reportSchedule: null,
+    reportLabel: "Todos",
+    kind: "all"
+  });
+
+  const schedulePending = await service.getPartialGradeStatistics({
+    course: "1IND52",
+    term: "2026-2",
+    evaluationType: "Pb",
+    evaluationNumber: 1,
+    scope: "schedule",
+    schedule: "0732"
+  });
+  assert.equal(schedulePending.data.state, "pending");
+  await service.waitForIdle();
+  assert.equal(calls.length, 2);
+
+  await assert.rejects(
+    service.getPartialGradeStatistics({
+      course: "1IND52",
+      term: "2026-2",
+      evaluationType: "Pb",
+      evaluationNumber: 1,
+      scope: "schedule"
+    }),
+    (error) => error.code === "grade_statistics_schedule_required"
+  );
 });
 
 test("partial statistics distinguish an existing assessment whose statistics are not published", async () => {

@@ -138,6 +138,130 @@ export function selectAcademicPerformanceReportIndex(html) {
     ?.index ?? -1;
 }
 
+export function resolveGradeStatisticsScopeOption(selects = []) {
+  for (const select of selects) {
+    const options = Array.isArray(select?.options) ? select.options : [];
+    const all = options.find(({ label }) => searchableText(label) === "todos");
+    if (!all) continue;
+    const scheduleOptions = options.filter(({ label }) => /^\d{4}(?:\s|$)/u.test(cleanText(label)));
+    if (
+      searchableText(select?.name).includes("horario") ||
+      searchableText(select?.id).includes("horario") ||
+      scheduleOptions.length >= 2
+    ) {
+      return {
+        selectIndex: Number(select.index),
+        optionValue: String(all.value ?? ""),
+        reportLabel: cleanText(all.label)
+      };
+    }
+  }
+  return null;
+}
+
+async function selectOfficialGradeStatisticsAggregate(page, policy) {
+  await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+  for (const frame of page.frames()) {
+    try {
+      policy.assertFinalUrl(frame.url());
+    } catch {
+      continue;
+    }
+    const selects = frame.locator("select");
+    const definitions = await selects.evaluateAll((nodes) =>
+      nodes.map((node, index) => ({
+        index,
+        name: node.getAttribute("name") ?? "",
+        id: node.id ?? "",
+        options: [...node.options].map((option) => ({
+          value: option.value,
+          label: option.textContent ?? option.label ?? ""
+        }))
+      }))
+    );
+    const selection = resolveGradeStatisticsScopeOption(definitions);
+    if (!selection) continue;
+
+    const select = selects.nth(selection.selectIndex);
+    const onchange = String(await select.getAttribute("onchange") ?? "").trim();
+    await select.selectOption({ value: selection.optionValue });
+
+    // Some Campus reports submit immediately from onchange. Others expose a
+    // Graficar/Consultar control. Trigger only one path so the read-only report
+    // is never requested twice.
+    if (onchange) {
+      await frame.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+    } else {
+      const form = select.locator("xpath=ancestor::form[1]");
+      if ((await form.count()) === 0) {
+        throw adapterError(
+          "scrape_failed",
+          "Campus grade statistics Todos selector is not attached to a report form"
+        );
+      }
+      const controls = form.locator(
+        'button, input[type="submit"], input[type="button"]'
+      );
+      const labels = await controls.evaluateAll((nodes) =>
+        nodes.map((node) =>
+          String(node.textContent ?? node.getAttribute("value") ?? "").trim()
+        )
+      );
+      const controlIndex = labels.findIndex((label) =>
+        /^(?:graficar|consultar|mostrar)$/iu.test(label)
+      );
+      if (controlIndex >= 0) {
+        await Promise.all([
+          frame.waitForNavigation({
+            waitUntil: "domcontentloaded",
+            timeout: 45_000
+          }).catch(() => null),
+          controls.nth(controlIndex).click()
+        ]);
+      } else {
+        await Promise.all([
+          frame.waitForNavigation({
+            waitUntil: "domcontentloaded",
+            timeout: 45_000
+          }).catch(() => null),
+          form.evaluate((node) => node.requestSubmit())
+        ]);
+      }
+    }
+
+    // The legacy report may replace its iframe or open a named report window,
+    // leaving the original Playwright Frame detached/about:blank. Discover the
+    // resulting allowlisted statistics surface instead of trusting that stale
+    // frame reference.
+    for (const reportPage of [...page.context().pages()].reverse()) {
+      await reportPage.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(() => {});
+      for (const reportFrame of [...reportPage.frames()].reverse()) {
+        try {
+          policy.assertFinalUrl(reportFrame.url());
+          const html = await readStablePageContent(reportFrame);
+          if (parseLegacyGradeStatisticsHtml(html).state !== "available") continue;
+          return {
+            reportLabel: selection.reportLabel,
+            url: reportFrame.url(),
+            html
+          };
+        } catch {
+          continue;
+        }
+      }
+    }
+    throw adapterError(
+      "scrape_failed",
+      "Campus did not return the Todos grade statistics report"
+    );
+  }
+  throw adapterError(
+    "scrape_failed",
+    "Campus grade statistics report does not expose the official Todos scope"
+  );
+}
+
 export function registrationChangesApplied(
   workspace,
   { addCourseCodes = [], removeRefs = [] } = {}
@@ -680,6 +804,10 @@ async function createPlaywrightSession({ config, policy }) {
       }),
       links.nth(index).click()
     ]);
+    const aggregate = reference.statisticsScope === "all"
+      ? await selectOfficialGradeStatisticsAggregate(page, policy)
+      : null;
+    if (aggregate) return aggregate;
     const finalUrl = page.url();
     policy.assertFinalUrl(finalUrl);
     const frames = await readAllowedPageFrames(page, policy);
@@ -688,7 +816,8 @@ async function createPlaywrightSession({ config, policy }) {
       html:
         frames.length > 0
           ? frames.map(({ html }) => html).join("\n")
-          : await readStablePageContent(page)
+          : await readStablePageContent(page),
+      ...(aggregate ? { reportLabel: aggregate.reportLabel } : {})
     };
   }
 
@@ -1348,6 +1477,62 @@ export function createLiveCampusAdapter({
       const start = options.start || limaToday(new Date(timestamp));
       const end = options.end || addDays(start, Number(options.days || 90));
 
+      const readAgendaModule = async () => {
+        if (!visible.has("agenda")) {
+          return {
+            state: "unavailable",
+            generatedAt: timestamp,
+            items: [],
+            range: { start, end },
+            reason: "role_unavailable"
+          };
+        }
+        try {
+          const entry = await session.goto(config.agendaEntryUrl);
+          const form = {
+            fechaInicio: compactDate(start),
+            fechaFin: compactDate(end),
+            categoria: "",
+            grupo: "00"
+          };
+          const response = await session.post(config.agendaJsonUrl, {
+            form,
+            headers: { referer: entry.url }
+          });
+          if (response.status < 200 || response.status >= 300) {
+            throw adapterError("network_error", "Campus agenda returned a non-success status");
+          }
+          policy.assertFinalUrl(response.finalUrl || config.agendaJsonUrl);
+          return {
+            state: "available",
+            generatedAt: timestamp,
+            label: visible.get("agenda").label,
+            href: visible.get("agenda").href,
+            range: { start, end },
+            items: parseAgendaPayload(response.body)
+          };
+        } catch (error) {
+          return {
+            state: "unavailable",
+            generatedAt: timestamp,
+            label: visible.get("agenda").label,
+            href: visible.get("agenda").href,
+            range: { start, end },
+            items: [],
+            reason: publicReason(error)
+          };
+        }
+      };
+
+      if (options.moduleScope === "agenda") {
+        modules.agenda = await readAgendaModule();
+        return {
+          generatedAt: timestamp,
+          retrievedAt: timestamp,
+          modules
+        };
+      }
+
       const enrollmentHtml = (portal.frames?.length ? portal.frames : [portal])
         .map(({ html }) => html)
         .join("\n");
@@ -1456,43 +1641,7 @@ export function createLiveCampusAdapter({
         }
       }
 
-      if (visible.has("agenda")) {
-        try {
-          const entry = await session.goto(config.agendaEntryUrl);
-          const form = {
-            fechaInicio: compactDate(start),
-            fechaFin: compactDate(end),
-            categoria: "",
-            grupo: "00"
-          };
-          const response = await session.post(config.agendaJsonUrl, {
-            form,
-            headers: { referer: entry.url }
-          });
-          if (response.status < 200 || response.status >= 300) {
-            throw adapterError("network_error", "Campus agenda returned a non-success status");
-          }
-          policy.assertFinalUrl(response.finalUrl || config.agendaJsonUrl);
-          modules.agenda = {
-            state: "available",
-            generatedAt: timestamp,
-            label: visible.get("agenda").label,
-            href: visible.get("agenda").href,
-            range: { start, end },
-            items: parseAgendaPayload(response.body)
-          };
-        } catch (error) {
-          modules.agenda = {
-            state: "unavailable",
-            generatedAt: timestamp,
-            label: visible.get("agenda").label,
-            href: visible.get("agenda").href,
-            range: { start, end },
-            items: [],
-            reason: publicReason(error)
-          };
-        }
-      }
+      if (visible.has("agenda")) modules.agenda = await readAgendaModule();
 
       if (visible.has("enrolled_courses")) {
         const courseHub = visible.get("enrolled_courses");
@@ -1892,6 +2041,7 @@ export function createLiveCampusAdapter({
         ...parsed,
         kind,
         courseCode: reference.courseCode,
+        ...(response.reportLabel ? { reportLabel: response.reportLabel } : {}),
         retrievedAt: now()
       };
     }, {

@@ -297,3 +297,31 @@ test("aggregate agenda context is derived from matching item calendars", async (
   assert.equal(result.data.academicContext.calendarId, "engineering-2026-2");
   assert.deepEqual(result.data.academicContext.referenceWeeks, [3, 4]);
 });
+
+test("top-level reference week follows the requested date instead of future assessment dates", async () => {
+  const calls = [];
+  const temporal = { calendars: [], async context(args) {
+    calls.push(args);
+    if (args.term === "2026-2") {
+      return {
+        state: "available", calendarId: "pucp-2026-2", currentWeek: 4,
+        referenceDate: args.date, referenceWeek: args.date === "2026-09-09" ? 4 : 9,
+        weekBasis: "calendar"
+      };
+    }
+    return { state: "scope_required", currentWeek: null, referenceWeek: null };
+  } };
+  const [tool] = calendar.withAcademicContext([{ name: "get_student_schedule", handler: async () => ({ data: {
+    activeTerm: "2026-2",
+    items: [
+      { courseCode: "CUR100", date: "2026-10-14" },
+      { courseCode: "CUR100", date: "2026-12-11" }
+    ]
+  } }) }], temporal);
+
+  const result = await tool.handler({ referenceDate: "2026-09-09" });
+
+  assert.equal(result.data.academicContext.referenceWeek, 4);
+  assert.equal(result.data.academicContext.referenceDate, "2026-09-09");
+  assert.equal(calls[0].term, "2026-2");
+});

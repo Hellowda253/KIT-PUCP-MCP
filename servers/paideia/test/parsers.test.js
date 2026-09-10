@@ -45,6 +45,22 @@ test("dashboard parser normalizes and deduplicates visible courses", async () =>
   assert.equal(isPlausibleDashboardPage("<form id=login></form>"), false);
 });
 
+test("dashboard fallback removes accessibility labels and duplicate course-card text", () => {
+  const courses = parseDashboardHtml(`
+    <body id="page-my-courses">
+      <a href="/course/view.php?id=303">
+        <span class="accesshide">El curso es destacado</span>
+        <span>Nombre del curso</span>
+        <span>2026-2 CONTROL DE GESTIÓN INDUSTRIAL (IND275-0734)</span>
+        <span>2026-2 CONTROL DE GESTIÓN INDUSTRIAL (IND275-0734)</span>
+      </a>
+    </body>
+  `, baseUrl);
+
+  assert.equal(courses[0].name, "2026-2 CONTROL DE GESTIÓN INDUSTRIAL (IND275-0734)");
+  assert.equal(courses[0].shortName, "CONTROL DE GESTIÓN INDUSTRIAL");
+});
+
 test("timeline catalog parser includes past courses and merges classifications by course id", () => {
   const courses = parseTimelineCourseCatalog([
     {

@@ -21,3 +21,5 @@ export {
 } from "./stdio-server.js";
 export { resolveCourse } from './course-resolver.js';
 export { createReusableSessionManager } from "./session-manager.js";
+export { buildCanonicalStudentSchedule, buildCourseOptions, normalizeCampusRoom } from "./schedule-components.js";
+export { enrichScheduleItemsWithAgenda, mergeExamRooms } from "./schedule-enrichment.js";

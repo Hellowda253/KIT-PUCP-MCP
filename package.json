@@ -1,6 +1,6 @@
 {
   "name": "pucp-academic-mcp",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Kit MCP comunitario para conectar asistentes de IA con Paideia y Campus Virtual PUCP.",
   "private": true,
   "license": "MIT",
@@ -19,6 +19,7 @@
     "contracts": "node scripts/generate-contracts.js",
     "tool-contracts": "node scripts/generate-tool-contracts.js",
     "install-config": "node scripts/generate-install-config.js",
+    "sync-skills": "node scripts/sync-skills.js",
     "doctor": "node scripts/doctor.js",
     "start:paideia": "npm start --workspace @pucp-academic-mcp/paideia",
     "start:campus": "npm start --workspace @pucp-academic-mcp/campus-virtual-pucp",

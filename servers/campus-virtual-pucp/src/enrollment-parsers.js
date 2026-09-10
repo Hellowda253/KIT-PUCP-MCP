@@ -1,4 +1,6 @@
 import { cleanText, searchableText } from "./text.js";
+import { parseScheduleReference } from "./schedule-reference.js";
+import { normalizeCampusRoom } from "@pucp-academic-mcp/common";
 
 const DAY_NAMES = new Map([
   ["lunes", "monday"],
@@ -376,10 +378,8 @@ function parseSessions(cell, fallbackKind, virtualColumn) {
       const dayKey = searchableText(match[1]);
       const dayEntry = [...DAY_NAMES].find(([spanish]) => dayKey.startsWith(spanish));
       if (!dayEntry) continue;
-      const room = cleanText(
-        match[4]
-          .replace(/^\s*(?:\([^)]*\)|[CPELT])\s*/i, "")
-      );
+      const rawRoom = cleanText(match[4].replace(/^\s*\([^)]*\)\s*/i, ""));
+      const { room, group } = normalizeCampusRoom(rawRoom);
       const virtual = /\bvirtual\b/i.test(`${match[0]} ${virtualColumn}`);
       sessions.push({
         day: dayEntry[1],
@@ -387,6 +387,7 @@ function parseSessions(cell, fallbackKind, virtualColumn) {
         end: match[3].padStart(5, "0"),
         kind: fallbackKind,
         room,
+        ...(group ? { group } : {}),
         virtual
       });
     }
@@ -461,6 +462,46 @@ export function filterScheduleItemsByStage(items, stage) {
   return requested ? [] : [...items];
 }
 
+function normalizeScheduleAssociations(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = `${item.term ?? ""}\0${item.courseCode ?? ""}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  for (const courseItems of groups.values()) {
+    const known = new Set(courseItems.map(({ scheduleId }) =>
+      String(scheduleId ?? "").trim().toUpperCase()
+    ).filter(Boolean));
+    const links = new Map(courseItems.map((item) => [item, new Set(
+      (item.associatedScheduleIds ?? [])
+        .map((id) => String(id).trim().toUpperCase())
+        .filter((id) => id && id !== String(item.scheduleId).toUpperCase())
+        .filter((id) => known.has(id) || /\D/u.test(id))
+    )]));
+    const classItems = courseItems.filter(({ scheduleType }) => scheduleType === "class");
+    for (const child of courseItems.filter(({ scheduleType }) =>
+      !["class", "exam"].includes(scheduleType)
+    )) {
+      const childId = String(child.scheduleId ?? "").trim().toUpperCase();
+      const match = childId.match(/^0*(\d{3,4})[A-Z]+$/u);
+      if (!match) continue;
+      const parents = classItems.filter(({ scheduleId }) => {
+        const parent = String(scheduleId ?? "").trim().toUpperCase().match(/^0*(\d+)$/u);
+        return parent?.[1] === match[1];
+      });
+      if (parents.length !== 1) continue;
+      const parent = parents[0];
+      links.get(parent).add(childId);
+      links.get(child).add(String(parent.scheduleId).trim().toUpperCase());
+    }
+    for (const [item, associated] of links) {
+      item.associatedScheduleIds = [...associated];
+    }
+  }
+  return items;
+}
+
 export function parseScheduleResultsHtml(html, options = {}) {
   const tables = [...String(html).matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)];
   for (const table of tables) {
@@ -501,7 +542,10 @@ export function parseScheduleResultsHtml(html, options = {}) {
         courseContext
       );
       const courseCode = cleanText(row[codeIndex]?.text).toUpperCase();
-      const scheduleId = cleanText(row[scheduleIndex]?.text);
+      const scheduleReference = parseScheduleReference(row[scheduleIndex]?.text, {
+        html: row[scheduleIndex]?.html
+      });
+      const { scheduleId } = scheduleReference;
       if (!courseCode || !scheduleId || !/^[A-Z0-9-]{3,15}$/.test(courseCode)) continue;
       courseContext = [row[codeIndex], row[courseIndex], row[creditsIndex]];
       const kind = scheduleType(row[typeIndex]?.text);
@@ -520,6 +564,12 @@ export function parseScheduleResultsHtml(html, options = {}) {
         term: options.term ?? "",
         scheduleType: kind,
         scheduleId,
+        ...(scheduleReference.scheduleLabel
+          ? {
+              scheduleLabel: scheduleReference.scheduleLabel,
+              rawSchedule: scheduleReference.rawSchedule
+            }
+          : {}),
         associatedScheduleIds: cleanText(row[associatedIndex]?.text)
           .split(/[,/\s]+/)
           .map((value) => value.trim())
@@ -543,7 +593,7 @@ export function parseScheduleResultsHtml(html, options = {}) {
       });
     }
     return items.length > 0
-      ? { state: "available", items }
+      ? { state: "available", items: normalizeScheduleAssociations(items) }
       : { state: "available", items: [], reason: "no_results" };
   }
   return { state: "unavailable", items: [], reason: "unsupported_layout" };
@@ -828,7 +878,10 @@ export function parseCrossUnitVacanciesHtml(html, options = {}) {
     }
     if (!indexes) continue;
     const courseCode = cleanText(row[indexes.codeIndex]?.text).toUpperCase();
-    const scheduleId = cleanText(row[indexes.scheduleIndex]?.text);
+    const scheduleReference = parseScheduleReference(row[indexes.scheduleIndex]?.text, {
+      html: row[indexes.scheduleIndex]?.html
+    });
+    const { scheduleId } = scheduleReference;
     if (!/^[A-Z0-9-]{3,15}$/.test(courseCode) || !scheduleId) continue;
     const associatedScheduleIds = cleanText(row[indexes.associatedIndex]?.text)
       .split(/[\s,;/]+/)
@@ -841,6 +894,12 @@ export function parseCrossUnitVacanciesHtml(html, options = {}) {
       credits: numberOrNull(row[indexes.creditsIndex]?.text),
       scheduleType: scheduleType(row[indexes.typeIndex]?.text),
       scheduleId,
+      ...(scheduleReference.scheduleLabel
+        ? {
+            scheduleLabel: scheduleReference.scheduleLabel,
+            rawSchedule: scheduleReference.rawSchedule
+          }
+        : {}),
       modality: normalizedModality(row[indexes.modalityIndex]?.text),
       associatedScheduleIds,
       capacity: {
@@ -993,7 +1052,8 @@ function parseRegisteredCoursesPayload(value, options = {}) {
     if (!/^[A-Z0-9-]{3,15}$/.test(courseCode)) continue;
     for (const schedule of Array.isArray(course?.[3]) ? course[3] : []) {
       const typeCode = cleanText(schedule?.[0]).toUpperCase();
-      const scheduleId = cleanText(schedule?.[1]).toUpperCase();
+      const scheduleReference = parseScheduleReference(schedule?.[1]);
+      const scheduleId = scheduleReference.scheduleId.toUpperCase();
       if (!/^[A-Z0-9-]{1,4}$/.test(typeCode) || !/^[A-Z0-9-]{2,15}$/.test(scheduleId)) continue;
       const principal = cleanText(schedule?.[8]) === "1";
       const rawPosition = cleanText(schedule?.[2]);
@@ -1004,6 +1064,12 @@ function parseRegisteredCoursesPayload(value, options = {}) {
         credits: numberOrNull(course?.[2]),
         scheduleType: registeredScheduleType(typeCode),
         scheduleId,
+        ...(scheduleReference.scheduleLabel
+          ? {
+              scheduleLabel: scheduleReference.scheduleLabel,
+              rawSchedule: scheduleReference.rawSchedule
+            }
+          : {}),
         status: cleanText(schedule?.[7]),
         position: rawPosition
           ? relativePosition(rawPosition, retrievedAt)
@@ -1049,7 +1115,10 @@ function parseRegisteredCourses(html, options) {
     const sessionsIndex = findColumn(headers, [/sesiones/]);
     return grid.slice(1).map((row) => {
       const courseCode = cleanText(row[codeIndex]?.text).toUpperCase();
-      const scheduleId = cleanText(row[scheduleIndex]?.text);
+      const scheduleReference = parseScheduleReference(row[scheduleIndex]?.text, {
+        html: row[scheduleIndex]?.html
+      });
+      const { scheduleId } = scheduleReference;
       if (!/^[A-Z0-9-]{3,15}$/.test(courseCode) || !scheduleId) return null;
       const kind = scheduleType(row[typeIndex]?.text);
       return {
@@ -1058,6 +1127,12 @@ function parseRegisteredCourses(html, options) {
         credits: numberOrNull(row[creditsIndex]?.text),
         scheduleType: kind,
         scheduleId,
+        ...(scheduleReference.scheduleLabel
+          ? {
+              scheduleLabel: scheduleReference.scheduleLabel,
+              rawSchedule: scheduleReference.rawSchedule
+            }
+          : {}),
         status: cleanText(row[statusIndex]?.text),
         position: relativePosition(row[positionIndex]?.text, options.retrievedAt ?? null),
         professor: cleanText(row[professorIndex]?.text),
@@ -1147,7 +1222,8 @@ export function parseRegistrationSearchPayload(value, options = {}) {
       const courseCode = cleanText(course?.[0]).toUpperCase();
       if (!/^[A-Z0-9-]{3,15}$/.test(courseCode)) continue;
       for (const schedule of Array.isArray(course?.[3]) ? course[3] : []) {
-        const scheduleId = cleanText(schedule?.[0]);
+        const scheduleReference = parseScheduleReference(schedule?.[0]);
+        const { scheduleId } = scheduleReference;
         const typeCode = cleanText(schedule?.[1]).toUpperCase();
         if (!scheduleId || !typeCode) continue;
         const raw = {
@@ -1167,6 +1243,12 @@ export function parseRegistrationSearchPayload(value, options = {}) {
           term: options.term ?? "",
           scheduleType: typeMap.get(typeCode) ?? typeCode.toLowerCase(),
           scheduleId,
+          ...(scheduleReference.scheduleLabel
+            ? {
+                scheduleLabel: scheduleReference.scheduleLabel,
+                rawSchedule: scheduleReference.rawSchedule
+              }
+            : {}),
           associatedScheduleIds: cleanText(schedule?.[5]).split(/[,/\s]+/).filter(Boolean),
           capacity: {
             vacancies: numberOrNull(schedule?.[8]),
@@ -1190,20 +1272,7 @@ export function parseRegistrationSearchPayload(value, options = {}) {
       }
     }
   }
-  const knownScheduleIds = new Map();
-  for (const item of items) {
-    const key = `${item.term}\0${item.courseCode}`;
-    if (!knownScheduleIds.has(key)) knownScheduleIds.set(key, new Set());
-    knownScheduleIds.get(key).add(String(item.scheduleId));
-  }
-  for (const item of items) {
-    const known = knownScheduleIds.get(`${item.term}\0${item.courseCode}`);
-    item.associatedScheduleIds = item.associatedScheduleIds.filter(id =>
-      (known.has(String(id)) && String(id) !== String(item.scheduleId)) ||
-      String(id).length >= 4 || /\D/u.test(String(id))
-    );
-  }
-  return { state: "available", items };
+  return { state: "available", items: normalizeScheduleAssociations(items) };
 }
 
 export function parseRegistrationScopePayload(value) {

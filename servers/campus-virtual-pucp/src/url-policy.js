@@ -314,6 +314,23 @@ export function createCampusUrlPolicy({
     }
   }
 
+  function isAgendaPostTarget(url) {
+    const sessionizedPath = url.pathname.match(
+      /^(.*);jsessionid=[a-z0-9._-]+$/iu
+    );
+    const pathname = sessionizedPath?.[1] ?? url.pathname;
+    const query = [...url.searchParams];
+    return (
+      url.origin === agendaJson.origin &&
+      pathname === agendaJson.pathname &&
+      !url.hash &&
+      query.length === 1 &&
+      query[0][0].toLowerCase() === "accion" &&
+      query[0][1].toLowerCase() ===
+        String(agendaJson.searchParams.get("accion") ?? "").toLowerCase()
+    );
+  }
+
   function assertRequest(value, {
     method = "GET",
     form,
@@ -324,7 +341,7 @@ export function createCampusUrlPolicy({
     if (verb === "GET" || verb === "HEAD") {
       return assertSafeGet(url, { allowAuth });
     }
-    if (verb === "POST" && url.href === agendaJson.href) {
+    if (verb === "POST" && isAgendaPostTarget(url)) {
       assertAgendaForm(form);
       return url;
     }
@@ -600,7 +617,6 @@ export function createCampusUrlPolicy({
         expected.every((key) => keys.has(key)) &&
         entries.length === expected.length;
       const commonValid =
-        values.accion === "Dibuja" &&
         /^\d{4}$/.test(values.cicloano ?? "") &&
         /^\d{2}$/.test(values.ciclo ?? "") &&
         /^[A-Z0-9]{3,12}$/i.test(values.clavecurso ?? "") &&
@@ -620,6 +636,10 @@ export function createCampusUrlPolicy({
           "accion"
         ]) &&
         commonValid &&
+        (
+          values.accion === "Dibuja" ||
+          (values.accion === "Espera" && values.Horario === "")
+        ) &&
         /^\d{2}$/.test(values.TipoCiclo ?? "") &&
         /^[A-Z0-9]{0,10}$/i.test(values.comision ?? "") &&
         /^[A-Z]{1,4}$/i.test(values.tipoevalu ?? "") &&
@@ -637,6 +657,7 @@ export function createCampusUrlPolicy({
           "facultad"
         ]) &&
         commonValid &&
+        values.accion === "Dibuja" &&
         /^\d{2}$/.test(values.tipociclo ?? "") &&
         /^\d{1,3}$/.test(values.facultad ?? "");
       if (partialValid || finalValid) return url;

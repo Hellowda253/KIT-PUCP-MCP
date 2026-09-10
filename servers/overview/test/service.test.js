@@ -89,7 +89,12 @@ const campus = {
   }
 };
 
-async function setup({ includePaideia = true, includeCampus = true } = {}) {
+async function setup({
+  includePaideia = true,
+  includeCampus = true,
+  campusSnapshot = campus,
+  scheduleSnapshot = null
+} = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "overview-"));
   const paideiaCachePath = path.join(root, "paideia.json");
   const campusCachePath = path.join(root, "campus.json");
@@ -97,8 +102,8 @@ async function setup({ includePaideia = true, includeCampus = true } = {}) {
   const campusHistoryPath = path.join(root, "campus-history.json");
   const campusSchedulePath = path.join(root, "course-schedules.json");
   if (includePaideia) await writeFile(paideiaCachePath, JSON.stringify(paideia));
-  if (includeCampus) await writeFile(campusCachePath, JSON.stringify(campus));
-  if (includeCampus) await writeFile(campusSchedulePath, JSON.stringify({
+  if (includeCampus) await writeFile(campusCachePath, JSON.stringify(campusSnapshot));
+  if (includeCampus) await writeFile(campusSchedulePath, JSON.stringify(scheduleSnapshot ?? {
     entries: [{
       generatedAt: "2026-07-24T11:00:00.000Z",
       retrievedAt: "2026-07-24T11:00:00.000Z",
@@ -179,6 +184,47 @@ test("course workspace uses Campus official grades and Paideia materials and pen
   assert.equal(result.data.materials[0].id, "m1");
   assert.equal(result.data.officialGrades[0].grade, "18");
   assert.equal(result.data.paideiaGrades[0].rawGrade, "17");
+});
+
+test("course workspace uses the same consolidated and agenda-enriched schedule representation", async () => {
+  const campusSnapshot = structuredClone(campus);
+  campusSnapshot.modules.student_schedule = {
+    state: "available",
+    generatedAt: "2026-07-24T11:00:00.000Z",
+    term: "2026-1",
+    items: [
+      { courseCode: "1IND59", courseName: "Simulación", term: "2026-1", scheduleId: "0834", scheduleType: "exam", day: "wednesday", start: "08:00", end: "09:00", room: "E117" },
+      { courseCode: "1IND59", courseName: "Simulación", term: "2026-1", scheduleId: "0834", scheduleType: "exam", day: "wednesday", start: "09:00", end: "10:00", room: "E117" }
+    ]
+  };
+  campusSnapshot.modules.agenda.items[0] = {
+    ...campusSnapshot.modules.agenda.items[0],
+    code: "1IND59",
+    schedule: "0834",
+    term: "2026-1",
+    beginTime: "08:00",
+    endTime: "10:00"
+  };
+  const scheduleSnapshot = {
+    entries: [{
+      generatedAt: "2026-07-24T11:30:00.000Z",
+      retrievedAt: "2026-07-24T11:30:00.000Z",
+      query: { mode: "current", term: "2026-1", courseCodes: ["1IND59"] },
+      items: [{
+        courseCode: "1IND59", courseName: "Simulación", term: "2026-1", scheduleId: "0834",
+        scheduleType: "exam", associatedScheduleIds: [], professor: "Docente",
+        sessions: [{ day: "wednesday", start: "08:00", end: "10:00", kind: "exam", room: "E117" }]
+      }]
+    }]
+  };
+  const service = await setup({ campusSnapshot, scheduleSnapshot });
+
+  const result = await service.getCourseWorkspace({ course: "simulacion" });
+
+  assert.equal(result.data.schedule.length, 1);
+  assert.equal(result.data.schedule[0].date, "2026-07-25");
+  assert.equal(result.data.schedule[0].examType, "partial");
+  assert.equal(result.data.scheduleStatus.representation, "canonical_enriched");
 });
 
 test("upcoming and recent changes are deterministic and source-labelled", async () => {

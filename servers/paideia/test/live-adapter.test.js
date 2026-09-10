@@ -566,6 +566,79 @@ test("course-specific synchronization opens only the requested past course", asy
   assert.equal(snapshot.coverage.allCourses, false);
 });
 
+test("automatic course refresh reuses a cached catalog without timeline AJAX", async () => {
+  const visited = [];
+  let timelineCalls = 0;
+  const pastCourse = {
+    id: "303",
+    sourceId: "303",
+    name: "2023-1 Fundamentos de Cálculo (1MAT05-I103)",
+    shortName: "FUNDAMENTOS DE CÁLCULO",
+    area: "pregrado_posgrado",
+    areas: ["pregrado_posgrado"],
+    url: "https://paideia.invalid/course/view.php?id=303",
+    sections: []
+  };
+  const makePage = () => {
+    let currentUrl = "about:blank";
+    return {
+      async goto(url) { currentUrl = url; visited.push(url); },
+      url() { return currentUrl; },
+      locator() { return { async count() { return 0; } }; },
+      async content() {
+        if (/\/course\/view\.php/u.test(currentUrl)) {
+          return '<body id="page-course-view"><li class="section"><h3 class="sectionname">Semana 1</h3><a href="/mod/resource/view.php?id=501">Guía</a></li></body>';
+        }
+        return '<body id="page-my-courses"><div data-region="course-content"></div></body>';
+      },
+      async evaluate() {
+        timelineCalls += 1;
+        return [];
+      },
+      async close() {}
+    };
+  };
+  const adapter = createLivePaideiaAdapter({
+    configLoader: async () => ({
+      user: "fixture-user",
+      pass: "fixture-pass",
+      baseUrl: "https://paideia.invalid",
+      continuingBaseUrl: "",
+      authHosts: ["pandora.pucp.edu.pe"],
+      chromePath: ""
+    }),
+    playwrightLoader: async () => ({
+      chromium: {
+        async launch() {
+          return {
+            async newContext() {
+              return { async newPage() { return makePage(); }, async close() {} };
+            },
+            async close() {}
+          };
+        }
+      }
+    })
+  });
+
+  const result = await adapter.sync({
+    components: ["catalog", "course_content"],
+    course: "303",
+    reuseCatalog: true,
+    previousSnapshot: {
+      courses: [pastCourse],
+      areaStates: [{ area: "pregrado_posgrado", state: "available", courseCount: 1 }]
+    }
+  });
+
+  assert.equal(timelineCalls, 0);
+  assert.deepEqual(visited.filter((url) => /\/course\/view\.php/u.test(url)), [pastCourse.url]);
+  assert.deepEqual(result.coverage.components, ["course_content"]);
+  assert.deepEqual(result.coverage.courseIds, ["303"]);
+  assert.equal(result.timings.catalogMs, 0);
+  assert.equal(result.materials[0].courseId, "303");
+});
+
 test("component sync avoids unrelated Paideia course, detail, forum, and grade pages", async () => {
   const dashboardHtml = await readFile(new URL("./fixtures/dashboard.html", import.meta.url), "utf8");
   const courseHtml = await readFile(new URL("./fixtures/course.html", import.meta.url), "utf8");

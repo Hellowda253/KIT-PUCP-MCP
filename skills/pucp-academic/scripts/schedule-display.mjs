@@ -56,6 +56,57 @@ function normalizedCourseCode(value) {
   return String(value ?? "").trim().toLocaleUpperCase("es-PE");
 }
 
+const EXAM_TYPE_LABELS = {
+  partial: "Parcial",
+  final: "Final",
+  unknown: "Examen"
+};
+
+const SHORT_DAYS = ["Dom.", "Lun.", "Mar.", "Mié.", "Jue.", "Vie.", "Sáb."];
+const SHORT_MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+function isoDateParts(value) {
+  const match = String(value ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) return null;
+  return { year, month, day, weekday: date.getUTCDay() };
+}
+
+export function formatExamDate(value) {
+  const parts = isoDateParts(value);
+  return parts ? `${parts.day} ${SHORT_MONTHS[parts.month - 1]}` : "";
+}
+
+function examSummary(session) {
+  const parts = isoDateParts(session.date);
+  const type = EXAM_TYPE_LABELS[session.examType] ?? EXAM_TYPE_LABELS.unknown;
+  if (!parts) {
+    if (session.datePrecision !== "weekday_time_only") return "";
+    const weekday = SHORT_DAYS[Number(session.day)] ?? "Día publicado";
+    return `${type}: ${weekday} · ${session.start}–${session.end}${session.room ? ` · ${session.room}` : ""} · Fecha no publicada`;
+  }
+  return `${type}: ${SHORT_DAYS[parts.weekday]} ${formatExamDate(session.date)} · ${session.start}–${session.end}${session.room ? ` · ${session.room}` : ""}`;
+}
+
+function courseExamSummary(courseCode, sessions) {
+  const code = normalizedCourseCode(courseCode);
+  return sessions
+    .filter((session) => session?.type === "exam" &&
+      (session.courseCodes ?? []).some((candidate) => normalizedCourseCode(candidate) === code))
+    .sort((left, right) => String(left.date).localeCompare(String(right.date)))
+    .map(examSummary)
+    .filter(Boolean)
+    .join("; ");
+}
+
 function sessionDisplayTitle(session, coursesByCode) {
   if (session?.type !== "exam") return readableLabel(session?.title);
   const courseNames = (Array.isArray(session.courseCodes) ? session.courseCodes : [])
@@ -67,10 +118,12 @@ function sessionDisplayTitle(session, coursesByCode) {
 }
 
 export function prepareScheduleDisplayData(data) {
+  const sourceSessions = Array.isArray(data?.sessions) ? data.sessions : [];
   const courses = Array.isArray(data?.courses) ? data.courses.map((course) => ({
     ...course,
     displayName: readableLabel(course.name),
-    displayInstructor: compactInstructor(course.instructor)
+    displayInstructor: compactInstructor(course.instructor),
+    displayExams: courseExamSummary(course.code, sourceSessions) || course.exams
   })) : [];
   const coursesByCode = new Map(
     courses
@@ -80,10 +133,16 @@ export function prepareScheduleDisplayData(data) {
   return {
     ...data,
     courses,
-    sessions: Array.isArray(data?.sessions) ? data.sessions.map((session) => ({
+    sessions: sourceSessions.map((session) => ({
       ...session,
       displayTitle: sessionDisplayTitle(session, coursesByCode),
-      displayInstructor: compactInstructor(session.instructor)
-    })) : []
+      displayInstructor: compactInstructor(session.instructor),
+      displayExamDate: session.type === "exam"
+        ? (formatExamDate(session.date) || (session.datePrecision === "weekday_time_only" ? "Fecha no publicada" : ""))
+        : "",
+      displayExamType: session.type === "exam"
+        ? (EXAM_TYPE_LABELS[session.examType] ?? EXAM_TYPE_LABELS.unknown)
+        : ""
+    }))
   };
 }

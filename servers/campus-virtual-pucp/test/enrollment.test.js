@@ -62,6 +62,65 @@ test("cross-unit vacancy parser preserves offering units and official vacancy ev
   assert.equal(JSON.stringify(result).includes("PRIVATE-UNIT-CODE"), false);
 });
 
+test("schedule catalog separates the technical schedule id from its visible label", () => {
+  const html = `
+    <table>
+      <tr><th>Clave</th><th>Nombre del curso</th><th>Cr.</th><th>Tipo Hor.</th><th>Hor.</th><th>Hor. Aso</th><th>Vac.</th><th>Vac.Unid</th><th>Ins.</th><th>Mat.</th><th>Profesor</th><th>Sesiones</th><th>Sesiones virtuales</th></tr>
+      <tr><td>1IND96</td><td>MARKETING ANALYTICS</td><td>3</td><td>Cla</td><td>1031 <a href="#LEYENDA">EN INGLÉS</a><svg onclick='AbreVentanaNueva("/pucp/horarios/howsepre/howsepre?horario=1031")'></svg></td><td></td><td>30</td><td>30</td><td>31</td><td>29</td><td>DOCENTE</td><td>MAR 14:00-16:00 C 0000</td><td>Sí</td></tr>
+      <tr><td>1IND49</td><td>FUNCA</td><td>3</td><td>Cla</td><td>0633 <a href="#LEYENDA">COIL-español</a></td><td></td><td>30</td><td>30</td><td>20</td><td>18</td><td>DOCENTE</td><td>LUN 10:00-12:00 A101</td><td>No</td></tr>
+    </table>`;
+
+  const result = parseScheduleResultsHtml(html, { term: "2026-2" });
+
+  assert.equal(result.state, "available");
+  assert.deepEqual(
+    result.items.map(({ scheduleId, scheduleLabel, rawSchedule }) => ({
+      scheduleId,
+      scheduleLabel,
+      rawSchedule
+    })),
+    [
+      { scheduleId: "1031", scheduleLabel: "EN INGLÉS", rawSchedule: "1031 EN INGLÉS" },
+      { scheduleId: "0633", scheduleLabel: "COIL-español", rawSchedule: "0633 COIL-español" }
+    ]
+  );
+});
+
+test("schedule catalog rejects vacancy values as associations and links alphanumeric child schedules", () => {
+  const html = `
+    <table>
+      <tr><th>Clave</th><th>Nombre del curso</th><th>Cr.</th><th>Tipo Hor.</th><th>Hor.</th><th>Hor. Aso</th><th>Vac.</th><th>Vac.Unid</th><th>Ins.</th><th>Mat.</th><th>Profesor</th><th>Sesiones</th><th>Sesiones virtuales</th></tr>
+      <tr><td>1MEC07</td><td>INGENIERÍA DE MATERIALES</td><td>3</td><td>Cla</td><td>0731</td><td>40</td><td>40</td><td>40</td><td>0</td><td>0</td><td>DOCENTE</td><td>LUN 08:00-10:00 U101</td><td>No</td></tr>
+      <tr><td>1MEC07</td><td>INGENIERÍA DE MATERIALES</td><td>3</td><td>Lab</td><td>731A</td><td>20</td><td>20</td><td>20</td><td>0</td><td>0</td><td>DOCENTE A</td><td>MAR 08:00-10:00 U107</td><td>No</td></tr>
+      <tr><td>1MEC07</td><td>INGENIERÍA DE MATERIALES</td><td>3</td><td>Lab</td><td>731B</td><td>20</td><td>20</td><td>20</td><td>0</td><td>0</td><td>DOCENTE B</td><td>MAR 10:00-12:00 U107</td><td>No</td></tr>
+      <tr><td>1MEC07</td><td>INGENIERÍA DE MATERIALES</td><td>3</td><td>Cla</td><td>0732</td><td>40</td><td>40</td><td>40</td><td>0</td><td>0</td><td>OTRO DOCENTE</td><td>JUE 08:00-10:00 U101</td><td>No</td></tr>
+    </table>`;
+
+  const result = parseScheduleResultsHtml(html, { term: "2026-1" });
+  const byId = new Map(result.items.map((item) => [item.scheduleId, item]));
+
+  assert.deepEqual(byId.get("0731").associatedScheduleIds, ["731A", "731B"]);
+  assert.deepEqual(byId.get("731A").associatedScheduleIds, ["0731"]);
+  assert.deepEqual(byId.get("731B").associatedScheduleIds, ["0731"]);
+  assert.deepEqual(byId.get("0732").associatedScheduleIds, []);
+  assert.equal(JSON.stringify(result.items).includes('"associatedScheduleIds":["40"]'), false);
+});
+
+test("schedule catalog separates subgroup prefixes from physical rooms", () => {
+  const html = `
+    <table>
+      <tr><th>Clave</th><th>Nombre del curso</th><th>Cr.</th><th>Tipo Hor.</th><th>Hor.</th><th>Hor. Aso</th><th>Vac.</th><th>Vac.Unid</th><th>Ins.</th><th>Mat.</th><th>Profesor</th><th>Sesiones</th><th>Sesiones virtuales</th></tr>
+      <tr><td>IND275</td><td>CONTROL DE GESTIÓN INDUSTRIAL</td><td>4.5</td><td>Pra</td><td>0734</td><td></td><td>40</td><td>40</td><td>0</td><td>0</td><td>DOCENTE</td><td>SÁB 10:00-12:00 A A701<br>SÁB 10:00-12:00 A A703</td><td>No</td></tr>
+    </table>`;
+
+  const result = parseScheduleResultsHtml(html, { term: "2026-2" });
+
+  assert.deepEqual(result.items[0].sessions.map(({ room, group }) => ({ room, group })), [
+    { room: "A701", group: "A" },
+    { room: "A703", group: "A" }
+  ]);
+});
+
 test("registration workspace exposes active enrollment data without hidden identity", () => {
   const html = `
     <h1>Matrícula: ESTUDIANTE (00000000) <span>Ciclo: 2026-2</span></h1>

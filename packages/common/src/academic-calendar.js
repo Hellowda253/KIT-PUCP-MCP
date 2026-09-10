@@ -370,7 +370,8 @@ export function withAcademicContext(tools, store) {
       const course = data.course ?? {};
       const context = await temporal.context({
         course: args.course, courseKeys: [course.id, course.code, course.name, course.shortName, data.courseId],
-        term: course.term || args.term, date: referenceDate || args.date || args.start
+        term: course.term || data.activeTerm || data.term || args.term,
+        date: referenceDate || args.date || args.start
       });
       const sections = course.sections ?? [];
       context.matchingSections = sections.filter(({ title }) => sectionMatches(title, context.referenceWeek)).map(({ title }) => title);

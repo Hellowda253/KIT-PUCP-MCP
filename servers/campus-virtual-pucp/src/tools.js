@@ -32,6 +32,20 @@ const courseCodes = {
   items: courseCode
 };
 
+const scheduleReference = {
+  type: "string",
+  minLength: 1,
+  maxLength: 80,
+  description: "Campus schedule identifier. A combined visible value such as '1031 EN INGLÉS' is accepted and normalized to its technical id."
+};
+
+const gradeStatisticsScope = {
+  type: "string",
+  enum: ["student_schedule", "schedule", "all"],
+  default: "student_schedule",
+  description: "Statistics population: the student's relevant schedule, one explicit schedule, or the official Campus 'Todos' aggregate. Use schedule only with scope='schedule'."
+};
+
 const registrationSelections = {
   type: "array",
   maxItems: 20,
@@ -40,7 +54,7 @@ const registrationSelections = {
     type: "object",
     properties: {
       courseCode,
-      scheduleId: { type: "string", minLength: 1, maxLength: 15 },
+      scheduleId: scheduleReference,
       scheduleType: {
         type: "string",
         enum: ["class", "practice", "exam", "laboratory", "directed_practice", "workshop", "advising"],
@@ -188,7 +202,7 @@ export function createCampusTools(service) {
           maxLength: 120,
           description: "Visible enrolled course code or an unambiguous course name. Prefer the course code."
         },
-        schedule: { type: "string", minLength: 1, maxLength: 15 },
+        schedule: scheduleReference,
         query: { type: "string", minLength: 1, maxLength: 120 },
         includeEmail: {
           type: "boolean",
@@ -207,13 +221,14 @@ export function createCampusTools(service) {
     },
     {
       name: "get_partial_grade_statistics",
-      description: "Fetch or return cached institutional Campus statistics for one partial assessment, including mean, median, deviation, pass rates, and distribution.",
+      description: "Fetch or return cached institutional Campus statistics for one partial assessment, including mean, median, deviation, pass rates, and distribution. Use scope='all' for the official Campus 'Todos' aggregate; omitting scope keeps the student's relevant schedule.",
       inputSchema: schema({
         course: { type: "string", minLength: 1 },
         term: { type: "string", pattern: "^\\d{4}-\\d+$" },
         evaluationType: { type: "string", minLength: 1, maxLength: 20 },
         evaluationNumber: { type: "integer", minimum: 1, maximum: 99 },
-        schedule: { type: "string", minLength: 1, maxLength: 10 },
+        scope: gradeStatisticsScope,
+        schedule: scheduleReference,
         ...refresh
       }, ["course", "term", "evaluationType", "evaluationNumber"]),
       handler: (args) => service.getPartialGradeStatistics(args)
@@ -224,7 +239,7 @@ export function createCampusTools(service) {
       inputSchema: schema({
         course: { type: "string", minLength: 1 },
         term: { type: "string", pattern: "^\\d{4}-\\d+$" },
-        schedule: { type: "string", minLength: 1, maxLength: 10 },
+        schedule: scheduleReference,
         ...refresh
       }, ["course", "term"]),
       handler: (args) => service.getFinalGradeStatistics(args)
@@ -259,7 +274,7 @@ export function createCampusTools(service) {
     },
     {
       name: "get_student_schedule",
-      description: "Return the authenticated student's authoritative recurring weekly pattern from the Campus Horario button and enrich missing professors, rooms, practices and exams with one grouped catalog query. If answerReady=false, wait for refreshJobId with get_campus_job_status and call this tool again before presenting a detailed final schedule. Never replace this personal schedule with the agenda or an offer search. A recurring pattern does not confirm an event on a specific calendar date; use Campus agenda for that.",
+      description: "Return the authenticated student's authoritative recurring weekly pattern from the Campus Horario button and enrich missing professors, rooms, practices and exams with one grouped catalog query. If answerReady=false and refreshJobId exists, wait with get_campus_job_status and call this tool again. If answerReady=false without a refresh job, weeklyPatternReady remains usable but published exam metadata is explicitly partial and must not be presented as complete. Multiple rooms for the same course, schedule, exam type, date and time are one exam for separate groups, not multiple exams. Never replace this personal schedule with the agenda or an offer search. A recurring pattern does not confirm an event on a specific calendar date; use Campus agenda for that.",
       inputSchema: schema(refresh),
       handler: (args) => service.getStudentSchedule(args)
     },
@@ -328,7 +343,7 @@ export function createCampusTools(service) {
     {
       name: "get_course_schedule_details",
       description: "Return one or all active-term sections of a course with linked sessions, professors, rooms, modality, survey, live-or-cached capacity, personal position when published, and explained risk.",
-      inputSchema: schema({ course: courseCode, schedule: { type: "string", minLength: 1, maxLength: 15 }, ...refresh }, ["course"]),
+      inputSchema: schema({ course: courseCode, schedule: scheduleReference, ...refresh }, ["course"]),
       handler: (args) => service.getCourseScheduleDetails(args)
     },
     {
@@ -339,13 +354,13 @@ export function createCampusTools(service) {
     },
     {
       name: "recommend_course_schedules",
-      description: "Generate and rank active-term schedules after grouping every class, practice, laboratory, and exam belonging to each selected schedule. Incomplete component evidence is rejected rather than reported as conflict-free; never enrolls or controls the Campus generator.",
+      description: "Generate and rank active-term schedules after grouping every class, practice, laboratory, and exam belonging to each selected schedule. Incomplete component evidence is rejected rather than reported as conflict-free. When the catalog only publishes an exam weekday and time, report Date not published and do not infer an exam date. Never enrolls or controls the Campus generator.",
       inputSchema: schema({ courseCodes, preferences, maxResults: { type: "integer", minimum: 1, maximum: 20 }, ...refresh }, ["courseCodes"]),
       handler: (args) => service.recommendCourseSchedules(args)
     },
     {
       name: "evaluate_course_schedule",
-      description: "Evaluate every class, practice, laboratory, and exam in a selected cached schedule combination. Returns incomplete validation instead of valid=true when required components or sessions cannot be resolved.",
+      description: "Evaluate every class, practice, laboratory, and exam in a selected cached schedule combination. Returns incomplete validation instead of valid=true when required components or sessions cannot be resolved. When the catalog only publishes an exam weekday and time, report Date not published and do not infer an exam date.",
       inputSchema: schema({
         selections: {
           type: "array",
@@ -353,7 +368,7 @@ export function createCampusTools(service) {
           maxItems: 10,
           items: {
             type: "object",
-            properties: { courseCode, scheduleId: { type: "string", minLength: 1, maxLength: 15 } },
+            properties: { courseCode, scheduleId: scheduleReference },
             required: ["courseCode", "scheduleId"],
             additionalProperties: false
           }

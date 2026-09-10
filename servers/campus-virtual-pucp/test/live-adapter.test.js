@@ -412,6 +412,56 @@ test("injected live adapter performs metadata-only discovery and known agenda PO
   assert.equal(calls.some(([kind]) => kind === "download"), false);
 });
 
+test("agenda-only sync does not crawl unrelated Campus modules", async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "campus-agenda-only-"));
+  const notesUrl = "https://eros.pucp.edu.pe/pucp/notas/oficiales?accion=consultar";
+  const calls = [];
+  const session = {
+    async authenticate() {},
+    async goto(url) {
+      calls.push(url);
+      if (url === campusPortal) {
+        return {
+          url,
+          html: `<a href="${agendaEntry}">Mi agenda</a><a href="${notesUrl}">Notas oficiales</a>`,
+          frames: []
+        };
+      }
+      if (url === agendaEntry) return { url, html: "<main>Agenda</main>" };
+      if (url === notesUrl) return { url, html: "<main>Notas</main>" };
+      throw new Error(`unexpected URL ${url}`);
+    },
+    async post(url) {
+      calls.push(url);
+      return {
+        status: 200,
+        finalUrl: url,
+        body: Buffer.from(JSON.stringify({ events: [] }), "latin1"),
+        headers: {}
+      };
+    },
+    async close() {}
+  };
+  const adapter = createLiveCampusAdapter({
+    loadConfig: async () => config(temporary),
+    createSession: async () => session,
+    now: () => "2026-09-10T10:00:00.000Z"
+  });
+
+  const result = await adapter.sync({
+    metadataOnly: true,
+    allowDownloads: false,
+    allowMutations: false,
+    moduleScope: "agenda",
+    start: "2026-10-14",
+    end: "2026-10-14"
+  });
+
+  assert.deepEqual(Object.keys(result.modules), ["agenda"]);
+  assert.equal(calls.includes(notesUrl), false);
+  assert.equal(result.modules.agenda.state, "available");
+});
+
 test("legacy course hub fans out to partial grades, history, and current enrolled courses", async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "campus-live-academic-"));
   const calls = [];
@@ -725,6 +775,40 @@ test("grade statistics adapter opens only the captured partial and final read re
       }
     }
   ]);
+});
+
+test("grade statistics discovers the real Todos option without assuming its value", () => {
+  assert.equal(typeof liveAdapter.resolveGradeStatisticsScopeOption, "function");
+  assert.deepEqual(
+    liveAdapter.resolveGradeStatisticsScopeOption([
+      {
+        index: 0,
+        name: "tipoNota",
+        options: [
+          { value: "N", label: "Normal" },
+          { value: "F", label: "Faltas" }
+        ]
+      },
+      {
+        index: 1,
+        name: "Horario",
+        options: [
+          { value: "", label: "Todos" },
+          { value: "A7", label: "0731" },
+          { value: "B9", label: "0732" }
+        ]
+      }
+    ]),
+    { selectIndex: 1, optionValue: "", reportLabel: "Todos" }
+  );
+  assert.equal(
+    liveAdapter.resolveGradeStatisticsScopeOption([{
+      index: 0,
+      name: "facultad",
+      options: [{ value: "", label: "Todos" }, { value: "12", label: "Ciencias e Ingeniería" }]
+    }]),
+    null
+  );
 });
 
 test("schedule catalog adapter uses the shared public report and never authenticates or opens the Campus generator", async () => {
@@ -1373,6 +1457,46 @@ test("agenda POST redirect changes to validated GET without forwarding form/body
   assert.equal(calls[0].options.maxRedirects, 0);
   assert.deepEqual(calls[0].options.form, form);
   assert.equal(Object.hasOwn(calls[1].options, "form"), false);
+  await terminal.dispose();
+});
+
+test("agenda POST may follow a same-origin sessionized redirect without widening the URL policy", async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "campus-agenda-session-redirect-"));
+  const policy = createCampusUrlPolicy(config(temporary));
+  const sessionized =
+    "https://eros.pucp.edu.pe/pucp/eventos/evwevnts/evwevnts;jsessionid=SAFE_SESSION?accion=MostrarMiAgendaJSON";
+  const first = response({
+    status: 307,
+    url: agendaJson,
+    location: sessionized
+  });
+  const terminal = response({ status: 200, url: sessionized, body: "done" });
+  const calls = [];
+  const request = {
+    async post(url, options) {
+      calls.push({ url, options });
+      return calls.length === 1 ? first : terminal;
+    }
+  };
+  const form = {
+    fechaInicio: "20261014",
+    fechaFin: "20261211",
+    categoria: "",
+    grupo: "00"
+  };
+
+  const result = await requestWithRedirectPolicy({
+    request,
+    initialUrl: agendaJson,
+    policy,
+    method: "POST",
+    form
+  });
+
+  assert.equal(result, terminal);
+  assert.deepEqual(calls.map(({ url }) => url), [agendaJson, sessionized]);
+  assert.deepEqual(calls[1].options.form, form);
+  assert.equal(first.wasDisposed(), true);
   await terminal.dispose();
 });
 

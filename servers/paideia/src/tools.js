@@ -80,6 +80,10 @@ export function createPaideiaTools(service) {
         course: { type: "string", minLength: 1 },
         maxSections: { type: "integer", minimum: 1, maximum: 60 },
         sampleLimit: { type: "integer", minimum: 1, maximum: 20 },
+        includeEmptySections: {
+          type: "boolean",
+          description: "Include empty unnamed Moodle structural sections for diagnostics. Defaults to false."
+        },
         ...refreshProperties
       }, ["course"]),
       handler: (args) => service.getCourseOutline(args)

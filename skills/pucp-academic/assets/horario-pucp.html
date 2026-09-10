@@ -117,6 +117,7 @@
     }
 
     .controls-group,
+    .view-controls,
     .legend-list,
     .legend-item,
     .segment-control {
@@ -125,6 +126,8 @@
     }
 
     .controls-group { gap: 8px; }
+    .view-controls { gap: 8px; flex-wrap: wrap; }
+    [hidden] { display: none !important; }
     .legend-list { gap: 16px; flex-wrap: wrap; font-size: 0.78rem; font-weight: 650; }
     .legend-item { gap: 6px; }
 
@@ -219,7 +222,7 @@
     .time-col,
     .day-col {
       display: grid;
-      grid-template-rows: repeat(15, var(--hour-height));
+      grid-template-rows: repeat(var(--hour-count, 15), var(--hour-height));
     }
 
     .time-col {
@@ -366,7 +369,7 @@
     @media (max-width: 760px) {
       body { padding: 8px; }
       .header-bar, .sub-bar { align-items: stretch; padding: 12px; }
-      .header-bar, .sub-bar, .controls-group { flex-direction: column; }
+      .header-bar, .sub-bar, .controls-group, .view-controls { flex-direction: column; }
       .controls-group { width: 100%; }
       .btn-action { width: 100%; }
       .segment-control { display: grid; width: 100%; grid-template-columns: 1fr; }
@@ -466,10 +469,16 @@
         <div class="legend-item"><span class="legend-swatch lab" aria-hidden="true"></span><span>Laboratorios / prácticas</span></div>
         <div class="legend-item"><span class="legend-swatch exam" aria-hidden="true"></span><span>Exámenes</span></div>
       </div>
-      <div class="segment-control" aria-label="Vista del horario">
-        <button class="segment-btn active" id="mode-all" type="button" data-mode="all" aria-pressed="true">Vista completa</button>
-        <button class="segment-btn" id="mode-classes" type="button" data-mode="classes" aria-pressed="false">Semanas de clase</button>
-        <button class="segment-btn" id="mode-exams" type="button" data-mode="exams" aria-pressed="false">Semanas de exámenes</button>
+      <div class="view-controls">
+        <div class="segment-control" id="exam-type-control" aria-label="Tipo de examen" hidden>
+          <button class="segment-btn active" type="button" data-exam-type="partial" aria-pressed="true">Parciales</button>
+          <button class="segment-btn" type="button" data-exam-type="final" aria-pressed="false">Finales</button>
+        </div>
+        <div class="segment-control" id="mode-control" aria-label="Vista del horario">
+          <button class="segment-btn active" id="mode-all" type="button" data-mode="all" aria-pressed="true">Vista completa</button>
+          <button class="segment-btn" id="mode-classes" type="button" data-mode="classes" aria-pressed="false">Semanas de clase</button>
+          <button class="segment-btn" id="mode-exams" type="button" data-mode="exams" aria-pressed="false">Semanas de exámenes</button>
+        </div>
       </div>
     </section>
 
@@ -511,15 +520,18 @@
       "use strict";
 
       const DAYS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-      const START_MINUTES = 7 * 60;
-      const END_MINUTES = 22 * 60;
-      const DAY_MINUTES = END_MINUTES - START_MINUTES;
       const TYPE_LABELS = { class: "Clase", lab: "Práctica / Lab", exam: "Examen" };
 
       const data = JSON.parse(document.getElementById("schedule-data").textContent);
       const courses = Array.isArray(data.courses) ? data.courses : [];
       const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+      const { startMinutes: START_MINUTES, endMinutes: END_MINUTES } = scheduleBounds(sessions);
+      const DAY_MINUTES = END_MINUTES - START_MINUTES;
+      const START_HOUR = START_MINUTES / 60;
+      const END_HOUR = END_MINUTES / 60;
+      document.documentElement.style.setProperty("--hour-count", String(END_HOUR - START_HOUR));
       let activeMode = "all";
+      let activeExamType = "partial";
 
       function element(tag, className, text) {
         const node = document.createElement(tag);
@@ -533,6 +545,25 @@
         return (hour * 60) + minute;
       }
 
+      function scheduleBounds(items) {
+        const defaultStart = 7 * 60;
+        const defaultEnd = 22 * 60;
+        let earliest = defaultStart;
+        let latest = defaultEnd;
+        for (const session of items) {
+          const start = minutes(session?.start);
+          const end = minutes(session?.end);
+          if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+          earliest = Math.min(earliest, start);
+          latest = Math.max(latest, end);
+        }
+        const startMinutes = Math.max(0, Math.floor(earliest / 60) * 60);
+        const endMinutes = Math.min(24 * 60, Math.ceil(latest / 60) * 60);
+        return endMinutes > startMinutes
+          ? { startMinutes, endMinutes }
+          : { startMinutes: defaultStart, endMinutes: defaultEnd };
+      }
+
       function validSession(session) {
         const start = minutes(session.start);
         const end = minutes(session.end);
@@ -543,7 +574,14 @@
 
       function sessionLabel(session) {
         const codes = Array.isArray(session.courseCodes) ? session.courseCodes.join(" / ") : "";
-        return session.type === "exam" ? `${codes} — EXAMEN` : `${codes} — H${session.scheduleId ?? ""}`;
+        const examLabel = session.examType === "partial" ? "PARCIAL" : session.examType === "final" ? "FINAL" : "EXAMEN";
+        return session.type === "exam" ? `${codes} — ${examLabel}` : `${codes} — H${session.scheduleId ?? ""}`;
+      }
+
+      function examDateLabel(session) {
+        return session.type === "exam" && session.displayExamDate
+          ? `${session.displayExamType} · ${session.displayExamDate}`
+          : "";
       }
 
       function sessionDetails(session, readable = true) {
@@ -583,8 +621,9 @@
 
       function sessionIsVisible(session) {
         if (activeMode === "classes") return session.type !== "exam";
-        if (activeMode === "exams") return session.type === "exam";
-        return true;
+        if (activeMode === "exams") return session.type === "exam" && session.examType === activeExamType;
+        if (activeMode === "all") return session.type !== "exam" || session.examType !== "final";
+        return false;
       }
 
       function layoutDaySessions(daySessions, toMinutes) {
@@ -639,14 +678,14 @@
         ["Hora", ...DAYS].forEach((label) => grid.append(element("div", "col-header", label)));
 
         const timeColumn = element("div", "time-col");
-        for (let hour = 7; hour < 22; hour += 1) {
+        for (let hour = START_HOUR; hour < END_HOUR; hour += 1) {
           timeColumn.append(element("div", "time-slot", `${String(hour).padStart(2, "0")}:00`));
         }
         grid.append(timeColumn);
 
         DAYS.forEach((_, dayIndex) => {
           const dayColumn = element("div", "day-col");
-          for (let hour = 7; hour < 22; hour += 1) dayColumn.append(element("div", "grid-cell"));
+          for (let hour = START_HOUR; hour < END_HOUR; hour += 1) dayColumn.append(element("div", "grid-cell"));
           const daySessions = sessions.filter((session) =>
             validSession(session) && sessionIsVisible(session) && session.day === dayIndex + 1
           );
@@ -665,7 +704,7 @@
             event.classList.toggle("event-short", end - start <= 60);
             event.tabIndex = 0;
             event.setAttribute("aria-label", `${TYPE_LABELS[session.type]} ${sessionLabel(session)}, ${session.start} a ${session.end}`);
-            event.append(element("div", "event-top", `${session.start} – ${session.end}${session.weeksLabel ? ` (${session.weeksLabel})` : ""}`));
+            event.append(element("div", "event-top", `${session.start} – ${session.end}${examDateLabel(session) ? ` · ${examDateLabel(session)}` : ""}`));
             const content = element("div", "event-content");
             const heading = element("div");
             heading.append(element("div", "event-code", sessionLabel(session)));
@@ -695,7 +734,7 @@
           const day = element("section", "mobile-day");
           day.append(element("h3", "", dayName));
           const daySessions = sessions
-            .filter((session) => validSession(session) && session.day === dayIndex + 1)
+            .filter((session) => validSession(session) && sessionIsVisible(session) && session.day === dayIndex + 1)
             .sort((a, b) => minutes(a.start) - minutes(b.start));
           if (!daySessions.length) {
             day.append(element("div", "empty-state", "Sin sesiones"));
@@ -705,7 +744,7 @@
               item.append(element("div", "mobile-event-time", `${session.start} – ${session.end}`));
               const detail = element("div");
               detail.append(element("div", "mobile-event-title", `${sessionLabel(session)} · ${session.displayTitle || session.title || ""}`));
-              detail.append(element("div", "mobile-event-details", [TYPE_LABELS[session.type], sessionDetails(session), session.weeksLabel].filter(Boolean).join(" · ")));
+              detail.append(element("div", "mobile-event-details", [examDateLabel(session) || TYPE_LABELS[session.type], sessionDetails(session)].filter(Boolean).join(" · ")));
               item.append(detail);
               day.append(item);
             });
@@ -738,13 +777,14 @@
             course.displayInstructor || course.instructor, course.classes]
             .forEach((value) => addCell(row, value));
           addCell(row, course.practice, "lab");
-          addCell(row, course.exams, "exam");
+          addCell(row, course.displayExams || course.exams, "exam");
           body.append(row);
         });
       }
 
       function setMode(mode) {
         activeMode = mode;
+        if (mode === "exams") activeExamType = "partial";
         document.body.classList.remove("mode-all", "mode-classes", "mode-exams");
         document.body.classList.add(`mode-${mode}`);
         document.querySelectorAll("[data-mode]").forEach((button) => {
@@ -752,11 +792,33 @@
           button.classList.toggle("active", active);
           button.setAttribute("aria-pressed", String(active));
         });
+        const examTypeControl = document.getElementById("exam-type-control");
+        examTypeControl.hidden = mode !== "exams";
+        document.querySelectorAll("[data-exam-type]").forEach((button) => {
+          const active = button.dataset.examType === activeExamType;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
         renderDesktop();
+        renderMobile();
+      }
+
+      function setExamType(examType) {
+        activeExamType = examType;
+        document.querySelectorAll("[data-exam-type]").forEach((button) => {
+          const active = button.dataset.examType === examType;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
+        renderDesktop();
+        renderMobile();
       }
 
       document.querySelectorAll("[data-mode]").forEach((button) => {
         button.addEventListener("click", () => setMode(button.dataset.mode));
+      });
+      document.querySelectorAll("[data-exam-type]").forEach((button) => {
+        button.addEventListener("click", () => setExamType(button.dataset.examType));
       });
       document.getElementById("theme-toggle").addEventListener("click", (event) => {
         const dark = document.body.classList.toggle("theme-dark");

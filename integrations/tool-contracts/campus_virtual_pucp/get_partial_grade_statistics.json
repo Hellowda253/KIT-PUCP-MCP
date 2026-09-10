@@ -1,6 +1,6 @@
 {
   "name": "get_partial_grade_statistics",
-  "description": "Fetch or return cached institutional Campus statistics for one partial assessment, including mean, median, deviation, pass rates, and distribution.",
+  "description": "Fetch or return cached institutional Campus statistics for one partial assessment, including mean, median, deviation, pass rates, and distribution. Use scope='all' for the official Campus 'Todos' aggregate; omitting scope keeps the student's relevant schedule.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -22,10 +22,21 @@
         "minimum": 1,
         "maximum": 99
       },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "student_schedule",
+          "schedule",
+          "all"
+        ],
+        "default": "student_schedule",
+        "description": "Statistics population: the student's relevant schedule, one explicit schedule, or the official Campus 'Todos' aggregate. Use schedule only with scope='schedule'."
+      },
       "schedule": {
         "type": "string",
         "minLength": 1,
-        "maxLength": 10
+        "maxLength": 80,
+        "description": "Campus schedule identifier. A combined visible value such as '1031 EN INGLÉS' is accepted and normalized to its technical id."
       },
       "forceRefresh": {
         "type": "boolean",

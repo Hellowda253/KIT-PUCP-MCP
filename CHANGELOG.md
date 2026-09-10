@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-09-10
+
 - Deduplica calendarios equivalentes, normaliza los nombres de programa y da precedencia al registro curado frente a respaldos locales.
 - Devuelve `statistics_not_published` para notas finales aún no publicadas sin iniciar un trabajo de scraping innecesario.
 - Compara cambios de agenda únicamente dentro del rango temporal compartido, registra el alcance usado y neutraliza diffs antiguos cuyo rango se desconoce.
@@ -12,6 +14,7 @@
 - Evita cerrar la pestaña de Educación Continua mientras su catálogo AJAX sigue cargando y vuelve a abrir el área exacta cuando el SSO termina en Pregrado/Posgrado.
 - Evita sondeos lentos del portal de inscripción después de las fechas publicadas y usa la semana académica verificada como respaldo cuando el calendario de matrícula no está disponible.
 - Añade `forceProbe` a `get_registration_status` para reaperturas excepcionales y mantiene el catálogo de horarios y el horario matriculado como alternativas inmediatas.
+- Hace que Profe PUCP sugiera, de forma pertinente y no repetitiva, hasta dos acciones complementarias que realmente pueda realizar con la evidencia disponible.
 
 ## 0.3.1 - 2026-09-06
 

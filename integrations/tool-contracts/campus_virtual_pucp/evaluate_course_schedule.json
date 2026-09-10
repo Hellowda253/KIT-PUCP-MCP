@@ -1,6 +1,6 @@
 {
   "name": "evaluate_course_schedule",
-  "description": "Evaluate every class, practice, laboratory, and exam in a selected cached schedule combination. Returns incomplete validation instead of valid=true when required components or sessions cannot be resolved.",
+  "description": "Evaluate every class, practice, laboratory, and exam in a selected cached schedule combination. Returns incomplete validation instead of valid=true when required components or sessions cannot be resolved. When the catalog only publishes an exam weekday and time, report Date not published and do not infer an exam date.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -18,7 +18,8 @@
             "scheduleId": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 15
+              "maxLength": 80,
+              "description": "Campus schedule identifier. A combined visible value such as '1031 EN INGLÉS' is accepted and normalized to its technical id."
             }
           },
           "required": [

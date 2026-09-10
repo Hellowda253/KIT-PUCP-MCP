@@ -55,7 +55,7 @@ const snapshot = {
 async function setup(options = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "paideia-service-"));
   const cachePath = path.join(dir, "cache.json");
-  await writeFile(cachePath, JSON.stringify(snapshot));
+  await writeFile(cachePath, JSON.stringify(options.snapshot ?? snapshot));
   const calls = [];
   const adapter = options.adapter ?? {
     async sync() {
@@ -98,6 +98,29 @@ test("all cached queries use the five-field Paideia envelope and deterministic f
   assert.equal((await service.listAnnouncements({ course: "Álgebra" })).data.state, "available");
   assert.equal((await service.listCourseGrades({ course: "1" })).data.items[0].rawGrade, "18");
   assert.equal((await service.searchMaterials({ query: "datos" })).data.items[0].id, "m1");
+});
+
+test("course outline uses a canonical name and omits empty unnamed sections by default", async () => {
+  const current = structuredClone(snapshot);
+  current.courses = [{
+    id: "1", sourceId: "1", area: "pregrado_posgrado", areas: ["pregrado_posgrado"],
+    name: "El curso es destacado Nombre del curso 2026-2 CONTROL DE GESTIÓN INDUSTRIAL (IND275-0734) 2026-2 CONTROL DE GESTIÓN INDUSTRIAL (IND275-0734)",
+    shortName: "CONTROL DE GESTIÓN INDUSTRIAL",
+    url: "https://example/course?id=1",
+    sections: [
+      { id: "empty", courseId: "1", title: "Sin sección", activityIds: [] },
+      { id: "real", courseId: "1", title: "Semana 1", activityIds: ["a1"] }
+    ]
+  }];
+  const { service } = await setup({ snapshot: current, now: () => generatedAt });
+
+  const result = await service.getCourseOutline({ course: "1" });
+  const diagnostic = await service.getCourseOutline({ course: "1", includeEmptySections: true });
+
+  assert.equal(result.data.course.name, "2026-2 CONTROL DE GESTIÓN INDUSTRIAL (IND275-0734)");
+  assert.deepEqual(result.data.course.sections.map(({ id }) => id), ["real"]);
+  assert.equal(result.data.course.omittedEmptySectionCount, 1);
+  assert.deepEqual(diagnostic.data.course.sections.map(({ id }) => id), ["empty", "real"]);
 });
 
 test("stale query returns last good cache while starting one background refresh", async () => {
@@ -164,6 +187,93 @@ test("course queries pass their course selector to focused background refreshes"
 
   assert.equal(calls[0].course, "1");
   assert.deepEqual(calls[0].components, ["catalog", "course_content"]);
+});
+
+test("empty stale course materials return pending and reuse the cached catalog", async () => {
+  const historicalSnapshot = structuredClone(snapshot);
+  historicalSnapshot.generatedAt = "2026-01-01T10:00:00.000Z";
+  historicalSnapshot.retrievedAt = historicalSnapshot.generatedAt;
+  historicalSnapshot.courses.push({
+    id: "303",
+    sourceId: "303",
+    area: "pregrado_posgrado",
+    areas: ["pregrado_posgrado"],
+    name: "2023-1 FUNDAMENTOS DE CÁLCULO (1MAT05-I103)",
+    shortName: "FUNDAMENTOS DE CÁLCULO",
+    url: "https://example/course?id=303",
+    sections: []
+  });
+  const calls = [];
+  let resolveSync;
+  let markSyncStarted;
+  const syncStarted = new Promise((resolve) => { markSyncStarted = resolve; });
+  const { service } = await setup({
+    snapshot: historicalSnapshot,
+    adapter: {
+      sync(input) {
+        calls.push(input);
+        markSyncStarted();
+        return new Promise((resolve) => { resolveSync = resolve; });
+      }
+    }
+  });
+
+  const result = await service.searchMaterials({ course: "1MAT05-I103" });
+
+  assert.equal(result.data.state, "pending");
+  assert.equal(result.data.count, 0);
+  assert.match(result.data.refreshJobId, /^sync-/u);
+  assert.match(result.warnings[0], /no cached matching data.*get_paideia_job_status.*repeat/iu);
+  await syncStarted;
+  assert.equal(calls[0].course, "303");
+  assert.equal(calls[0].reuseCatalog, true);
+  resolveSync({
+    ...historicalSnapshot,
+    generatedAt: now,
+    retrievedAt: now,
+    coverage: { components: ["course_content"], allCourses: false, courseIds: ["303"] }
+  });
+  await service.waitForIdle();
+  const completed = await service.getJobStatus({ jobId: result.data.refreshJobId });
+  assert.deepEqual(completed.data.result.components, ["course_content"]);
+});
+
+test("empty stale course outline is marked incomplete while its focused refresh runs", async () => {
+  const historicalSnapshot = structuredClone(snapshot);
+  historicalSnapshot.generatedAt = "2026-01-01T10:00:00.000Z";
+  historicalSnapshot.retrievedAt = historicalSnapshot.generatedAt;
+  historicalSnapshot.courses = [{
+    id: "303",
+    sourceId: "303",
+    area: "pregrado_posgrado",
+    areas: ["pregrado_posgrado"],
+    name: "2023-1 FUNDAMENTOS DE CÁLCULO (1MAT05-I103)",
+    shortName: "FUNDAMENTOS DE CÁLCULO",
+    url: "https://example/course?id=303",
+    sections: []
+  }];
+  let resolveSync;
+  let started;
+  const syncStarted = new Promise((resolve) => { started = resolve; });
+  const { service } = await setup({
+    snapshot: historicalSnapshot,
+    adapter: {
+      sync() {
+        started();
+        return new Promise((resolve) => { resolveSync = resolve; });
+      }
+    }
+  });
+
+  const result = await service.getCourseOutline({ course: "1MAT05-I103" });
+
+  assert.equal(result.data.state, "pending");
+  assert.equal(result.data.incomplete, true);
+  assert.equal(result.data.course.sectionCount, 0);
+  assert.match(result.warnings.join(" "), /no cached matching data|incomplete|refresh/iu);
+  await syncStarted;
+  resolveSync({ ...historicalSnapshot, generatedAt: now, retrievedAt: now });
+  await service.waitForIdle();
 });
 
 test("component refresh preserves unrelated Paideia cache slices", async () => {

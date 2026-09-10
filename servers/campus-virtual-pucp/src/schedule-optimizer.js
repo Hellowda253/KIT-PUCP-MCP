@@ -1,11 +1,12 @@
 import { searchableText } from "./text.js";
 import { buildCourseOptions } from "./schedule-components.js";
+import { normalizeScheduleId } from "./schedule-reference.js";
 
 export const DEFAULT_SCHEDULE_PREFERENCES = Object.freeze({
   freeDays: [],
   preferredDays: [],
-  earliestStart: "07:00",
-  latestEnd: "22:00",
+  earliestStart: null,
+  latestEnd: null,
   unavailable: [],
   preferredModality: "any",
   preferredProfessors: [],
@@ -134,10 +135,37 @@ function optionSessions(option) {
     : option.sessions ?? [];
 }
 
+function recurringOptionSessions(option) {
+  return optionSessions(option).filter((session) =>
+    !searchableText(session.kind ?? session.type).includes("exam")
+  );
+}
+
 function optionIds(option) {
   return option.components
     ? option.components.map(({ scheduleId }) => scheduleId)
     : [option.scheduleId];
+}
+
+function temporalCompleteness(options) {
+  return options.some((option) => optionSessions(option).some((session) =>
+    searchableText(session.kind).includes("exam") &&
+    !(session.date ?? session.beginDate)
+  )) ? "partial" : "complete";
+}
+
+function conflictCertainty(left, right) {
+  const leftDate = left.date ?? left.beginDate ?? null;
+  const rightDate = right.date ?? right.beginDate ?? null;
+  // A dated event cannot prove that an undated weekly pattern actually occurs
+  // on that exceptional date. Keep the overlap visible, but do not reject the
+  // schedule until both sides have date-level evidence.
+  if (Boolean(leftDate) !== Boolean(rightDate)) return "potential";
+  return [left, right].some((session) =>
+    searchableText(session.kind).includes("exam") &&
+    !(session.date ?? session.beginDate) &&
+    !session.weeks?.length
+  ) ? "potential" : "confirmed";
 }
 
 function conflictsFor(options) {
@@ -149,8 +177,7 @@ function conflictsFor(options) {
           if (!overlap(left, right)) continue;
           conflicts.push({
             kind: "overlap",
-            certainty: [left, right].some(s => /exam/.test(s.kind ?? '') && !(s.date ?? s.beginDate) && !s.weeks?.length)
-              ? "potential" : "confirmed",
+            certainty: conflictCertainty(left, right),
             day: left.day,
             start: left.start > right.start ? left.start : right.start,
             end: left.end < right.end ? left.end : right.end,
@@ -167,12 +194,12 @@ function conflictsFor(options) {
 function hardConstraintReasons(option, preferences) {
   const reasons = new Set();
   if (option.completenessIssues?.length) reasons.add("incomplete_schedule");
-  const sessions = optionSessions(option);
+  const sessions = recurringOptionSessions(option);
   if (sessions.some(({ day }) => preferences.freeDays.includes(day))) reasons.add("free_days");
-  if (sessions.some(({ start }) => minutes(start) < minutes(preferences.earliestStart))) {
+  if (preferences.earliestStart && sessions.some(({ start }) => minutes(start) < minutes(preferences.earliestStart))) {
     reasons.add("earliest_start");
   }
-  if (sessions.some(({ end }) => minutes(end) > minutes(preferences.latestEnd))) {
+  if (preferences.latestEnd && sessions.some(({ end }) => minutes(end) > minutes(preferences.latestEnd))) {
     reasons.add("latest_end");
   }
   if (
@@ -193,7 +220,7 @@ function hardConstraintReasons(option, preferences) {
 }
 
 function scheduleMetrics(options, preferences) {
-  const sessions = options.flatMap(optionSessions);
+  const sessions = options.flatMap(recurringOptionSessions);
   const byDay = new Map();
   for (const session of sessions) {
     if (!byDay.has(session.day)) byDay.set(session.day, []);
@@ -301,7 +328,10 @@ function publicCourse(option) {
   return {
     courseCode: option.courseCode,
     courseName: option.courseName ?? "",
+    credits: Number(option.credits ?? 0),
     scheduleId: option.scheduleId,
+    scheduleLabel: option.scheduleLabel ?? "",
+    rawSchedule: option.rawSchedule ?? option.scheduleId,
     associatedScheduleIds: option.components
       ? option.components.slice(1).map(({ scheduleId }) => scheduleId)
       : option.associatedScheduleIds ?? [],
@@ -325,7 +355,7 @@ export function evaluateCourseSchedule({ offerings = [], selections = [], prefer
   const missing = [];
   for (const selection of selections) {
     const candidates = (options.get(String(selection.courseCode).toUpperCase()) ?? []).filter(
-      (option) => optionIds(option).includes(String(selection.scheduleId))
+      (option) => optionIds(option).includes(normalizeScheduleId(selection.scheduleId))
     );
     const found = candidates.length === 1 ? candidates[0] : null;
     if (found) selected.push(found);
@@ -333,11 +363,15 @@ export function evaluateCourseSchedule({ offerings = [], selections = [], prefer
   }
   const hardReasons = selected.flatMap((option) => hardConstraintReasons(option, effective));
   const conflicts = conflictsFor(selected);
+  const confirmedConflicts = conflicts.filter(({ certainty }) => certainty === "confirmed");
+  const potentialConflicts = conflicts.filter(({ certainty }) => certainty === "potential");
   const result = scored(selected, effective);
   if (result.metrics.dayCount > Number(effective.maxDays)) hardReasons.push("max_days");
   return {
-    valid: missing.length === 0 && hardReasons.length === 0 && conflicts.length === 0,
-    validationStatus: missing.length || selected.some(o => o.completenessIssues?.length) ? "incomplete" : "complete",
+    valid: missing.length === 0 && hardReasons.length === 0 && confirmedConflicts.length === 0,
+    validationStatus: missing.length || selected.some(o => o.completenessIssues?.length) || potentialConflicts.length
+      ? "incomplete"
+      : "complete",
     missing,
     conflicts,
     hardConstraintViolations: [...new Set(hardReasons)],
@@ -370,14 +404,29 @@ export function recommendCourseSchedules({
   }
   const byCourse = buildCourseOptions(offerings);
   const unsatisfied = new Set();
-  const candidates = codes.map((code) =>
-    (byCourse.get(code) ?? []).filter((option) => {
+  const sourceOptions = codes.map((code) => byCourse.get(code) ?? []);
+  const exclusionReasons = sourceOptions.map((options) => {
+    const reasons = new Set();
+    for (const option of options) {
+      for (const reason of hardConstraintReasons(option, effective)) {
+        reasons.add(reason);
+        unsatisfied.add(reason);
+      }
+    }
+    return [...reasons].sort();
+  });
+  const candidates = sourceOptions.map((options) =>
+    options.filter((option) => {
       const reasons = hardConstraintReasons(option, effective);
-      reasons.forEach((reason) => unsatisfied.add(reason));
       return reasons.length === 0;
     })
   );
-  const missingCourses = codes.filter((_, index) => candidates[index].length === 0);
+  const missingCourses = codes.filter((_, index) => sourceOptions[index].length === 0);
+  const constraintExcludedCourses = codes.flatMap((courseCode, index) =>
+    sourceOptions[index].length > 0 && candidates[index].length === 0
+      ? [{ courseCode, reasons: exclusionReasons[index] }]
+      : []
+  );
   const retainedLimit = Math.min(20, Math.max(1, Number(maxResults) || 5));
   const maxStates = Math.max(1, Math.floor(Number(searchLimits.maxStates) || 100_000));
   const compareRecommendations = (left, right) =>
@@ -389,7 +438,7 @@ export function recommendCourseSchedules({
   let exploredStates = 0;
   let validCombinations = 0;
   let truncated = false;
-  if (missingCourses.length === 0) {
+  if (missingCourses.length === 0 && constraintExcludedCourses.length === 0) {
     const orderedCandidates = candidates
       .map((options, index) => ({ code: codes[index], index, options: [...options].sort((left, right) =>
         optionIds(left).join("|").localeCompare(optionIds(right).join("|"))
@@ -404,9 +453,11 @@ export function recommendCourseSchedules({
           chosen.find((option) => option.courseCode === code)
         );
         const metrics = scored(orderedChosen, effective);
+        const conflicts = conflictsFor(orderedChosen).filter(({ certainty }) => certainty === "potential");
         valid.push({
           courses: orderedChosen.map(publicCourse),
-          conflicts: [],
+          conflicts,
+          temporalCompleteness: temporalCompleteness(orderedChosen),
           score: metrics.score,
           scoreBreakdown: metrics.scoreBreakdown,
           explanation: metrics.explanation,
@@ -422,12 +473,14 @@ export function recommendCourseSchedules({
           return;
         }
         exploredStates += 1;
-        if (chosen.some((selected) => conflictsFor([selected, option]).length > 0)) {
+        if (chosen.some((selected) =>
+          conflictsFor([selected, option]).some(({ certainty }) => certainty === "confirmed")
+        )) {
           unsatisfied.add("schedule_overlap");
           continue;
         }
         chosen.push(option);
-        const dayCount = new Set(chosen.flatMap(optionSessions).map(({ day }) => day)).size;
+        const dayCount = new Set(chosen.flatMap(recurringOptionSessions).map(({ day }) => day)).size;
         if (dayCount > Number(effective.maxDays)) {
           unsatisfied.add("max_days");
           chosen.pop();
@@ -444,6 +497,7 @@ export function recommendCourseSchedules({
       status: truncated ? "search_limit_reached" : "no_valid_schedule",
       recommendations: [],
       missingCourses,
+      constraintExcludedCourses,
       unsatisfiedConstraints: [...unsatisfied].sort(),
       suggestedRelaxations: [...unsatisfied].sort().map((constraint) => ({
         constraint,
@@ -475,6 +529,12 @@ export function recommendCourseSchedules({
     },
     warnings: [
       "Vacancies are observations, never guarantees of enrollment.",
+      ...(valid.some(({ conflicts }) => conflicts.length > 0)
+        ? ["Some overlaps remain potential because only one side has date-level evidence or Campus did not publish an exact exam date; verify them before choosing a schedule."]
+        : []),
+      ...(valid.some(({ temporalCompleteness }) => temporalCompleteness === "partial")
+        ? ["Some recommended exams retain the official weekday and time, but their exact exam date was not published by the Campus schedule catalog."]
+        : []),
       ...(truncated ? ["Schedule search reached its safety budget; recommendations are the best retained partial results."] : [])
     ]
   };

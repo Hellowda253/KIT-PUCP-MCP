@@ -18,6 +18,10 @@
         "minimum": 1,
         "maximum": 20
       },
+      "includeEmptySections": {
+        "type": "boolean",
+        "description": "Include empty unnamed Moodle structural sections for diagnostics. Defaults to false."
+      },
       "forceRefresh": {
         "type": "boolean",
         "description": "Start a metadata refresh when true while returning the last good cache."

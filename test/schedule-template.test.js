@@ -11,6 +11,7 @@ const templatePath = path.join(skillRoot, "assets", "horario-pucp.html");
 const rendererPath = path.join(skillRoot, "scripts", "render-schedule.mjs");
 const layoutPath = path.join(skillRoot, "scripts", "schedule-layout.mjs");
 const displayPath = path.join(skillRoot, "scripts", "schedule-display.mjs");
+const sourcePath = path.join(skillRoot, "scripts", "schedule-source.mjs");
 
 async function exists(file) {
   try {
@@ -20,6 +21,141 @@ async function exists(file) {
     return false;
   }
 }
+
+function campusScheduleEnvelope() {
+  return {
+    data: {
+      state: "available",
+      answerReady: true,
+      activeTerm: "2026-2",
+      courseDetails: [{
+        courseCode: "1IND95",
+        courseName: "SUPPLY CHAIN ANALYTICS",
+        credits: 3,
+        scheduleIds: ["1031"],
+        sessions: [{
+          day: "thursday", start: "15:00", end: "17:00", kind: "class",
+          scheduleId: "1031", room: "G103", professor: "Atoche, W."
+        }, {
+          day: "thursday", start: "17:00", end: "19:00", kind: "laboratory",
+          scheduleId: "1031", room: "S G103", professor: "Fernandez, M."
+        }]
+      }, {
+        courseCode: "1IND52",
+        courseName: "DISEÑO DE LA CADENA DE SUMINISTROS Y OPERACIONES",
+        credits: 4,
+        scheduleIds: ["0732"],
+        sessions: [{
+          day: "thursday", start: "20:00", end: "21:00", kind: "practice",
+          scheduleId: "0732", room: "S E115", professor: "Rojas, J."
+        }, {
+          day: "thursday", start: "21:00", end: "22:00", kind: "laboratory",
+          scheduleId: "0732", room: "S E115", professor: "Rojas, J."
+        }]
+      }, {
+        courseCode: "IND275",
+        courseName: "CONTROL DE GESTIÓN INDUSTRIAL",
+        credits: 4.5,
+        scheduleIds: ["0734"],
+        sessions: [
+          { day: "tuesday", start: "08:00", end: "11:00", kind: "exam", examType: "partial", date: "2026-10-13", scheduleId: "0734", room: "A402" },
+          { day: "tuesday", start: "08:00", end: "11:00", kind: "exam", examType: "partial", date: "2026-10-13", scheduleId: "0734", room: "A607" },
+          { day: "tuesday", start: "08:00", end: "11:00", kind: "exam", examType: "final", date: "2026-12-01", scheduleId: "0734", room: "A402" },
+          { day: "tuesday", start: "08:00", end: "11:00", kind: "exam", examType: "final", date: "2026-12-01", scheduleId: "0734", room: "A607" }
+        ]
+      }]
+    }
+  };
+}
+
+test("Campus schedule source maps kinds deterministically and merges compatible fragments", async () => {
+  assert.equal(await exists(sourcePath), true, "schedule source adapter must exist");
+  const { prepareScheduleSourceData } = await import(pathToFileURL(sourcePath));
+  const data = prepareScheduleSourceData(campusScheduleEnvelope());
+
+  assert.equal(data.term, "2026-2");
+  assert.equal(data.credits, 11.5);
+  assert.deepEqual(
+    data.sessions.filter(({ courseCodes }) => courseCodes.includes("1IND95")).map(({ type, start, end }) => ({ type, start, end })),
+    [{ type: "class", start: "15:00", end: "17:00" }, { type: "lab", start: "17:00", end: "19:00" }]
+  );
+  assert.deepEqual(
+    data.sessions.filter(({ courseCodes }) => courseCodes.includes("1IND52")).map(({ type, start, end }) => ({ type, start, end })),
+    [{ type: "lab", start: "20:00", end: "22:00" }]
+  );
+});
+
+test("Campus schedule source keeps partial and final separate while merging their rooms", async () => {
+  const { prepareScheduleSourceData } = await import(pathToFileURL(sourcePath));
+  const data = prepareScheduleSourceData(campusScheduleEnvelope());
+  const exams = data.sessions.filter(({ courseCodes, type }) => type === "exam" && courseCodes.includes("IND275"));
+
+  assert.equal(exams.length, 2);
+  assert.deepEqual(exams.map(({ examType, date, rooms }) => ({ examType, date, rooms })), [{
+    examType: "partial", date: "2026-10-13", rooms: ["A402", "A607"]
+  }, {
+    examType: "final", date: "2026-12-01", rooms: ["A402", "A607"]
+  }]);
+});
+
+test("Campus schedule source collapses repeated undated exam rows without inventing partial or final", async () => {
+  const { prepareScheduleSourceData } = await import(pathToFileURL(sourcePath));
+  const source = campusScheduleEnvelope();
+  const course = source.data.courseDetails.find(({ courseCode }) => courseCode === "IND275");
+  course.sessions = ["A402", "A607", "A402", "A607"].map((room) => ({
+    day: "tuesday",
+    start: "08:00",
+    end: "11:00",
+    kind: "exam",
+    scheduleId: "0734",
+    room
+  }));
+
+  const data = prepareScheduleSourceData(source);
+  const exams = data.sessions.filter(({ courseCodes, type }) => type === "exam" && courseCodes.includes("IND275"));
+
+  assert.equal(exams.length, 1);
+  assert.equal(exams[0].examType, "unknown");
+  assert.equal(exams[0].datePrecision, "weekday_time_only");
+  assert.deepEqual(exams[0].rooms, ["A402", "A607"]);
+  assert.equal(data.warnings.filter(({ code }) => code === "exam_occurrences_ambiguous").length, 1);
+});
+
+test("Campus schedule source rejects unknown kinds instead of silently treating them as classes", async () => {
+  const { prepareScheduleSourceData } = await import(pathToFileURL(sourcePath));
+  const source = campusScheduleEnvelope();
+  source.data.courseDetails[0].sessions[1].kind = "mystery_component";
+
+  assert.throws(
+    () => prepareScheduleSourceData(source),
+    (error) => error.code === "schedule_session_kind_unsupported" && /mystery_component/u.test(error.message)
+  );
+});
+
+test("schedule renderer accepts the canonical get_student_schedule response without agent transcription", async () => {
+  const { renderScheduleTemplate } = await import(pathToFileURL(rendererPath));
+  const outputDir = await mkdtemp(path.join(tmpdir(), "pucp-campus-schedule-"));
+  const outputPath = path.join(outputDir, "horario.html");
+  try {
+    await renderScheduleTemplate({ templatePath, outputPath, data: campusScheduleEnvelope() });
+    const html = await readFile(outputPath, "utf8");
+    const embedded = html.match(/<script id="schedule-data" type="application\/json">([\s\S]*?)<\/script>/u)?.[1];
+    const rendered = JSON.parse(embedded);
+
+    assert.equal(rendered.courses.length, 3);
+    assert.equal(rendered.sessions.filter(({ type }) => type === "exam").length, 2);
+    assert.equal(rendered.sessions.find(({ start }) => start === "17:00").type, "lab");
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
+});
+
+test("schedule renderer uses one canonical output location when no custom path is requested", async () => {
+  const { defaultScheduleOutputPath } = await import(pathToFileURL(rendererPath));
+  const output = defaultScheduleOutputPath(campusScheduleEnvelope(), path.join("C:\\", "workspace"));
+
+  assert.equal(output, path.resolve("C:\\workspace", "Horarios_PUCP", "Horario_PUCP_2026-2.html"));
+});
 
 test("PUCP Academic bundles one UTF-8 responsive and printable schedule template", async () => {
   assert.equal(await exists(templatePath), true, "schedule template must exist");
@@ -107,9 +243,23 @@ test("schedule modes recalculate overlap lanes using only visible activities", a
     "filtered modes must not override lane widths with CSS"
   );
   assert.match(html, /let activeMode = "all";/);
+  assert.match(html, /let activeExamType = "partial";/);
   assert.match(html, /function sessionIsVisible\(session\)/);
   assert.match(html, /validSession\(session\) && sessionIsVisible\(session\)/);
   assert.match(html, /function setMode\(mode\)[\s\S]*activeMode = mode;[\s\S]*renderDesktop\(\);/);
+});
+
+test("schedule modes distinguish partial and final exams without treating dates as weekly duplicates", async () => {
+  const html = await readFile(templatePath, "utf8");
+
+  assert.match(html, /id="exam-type-control"[^>]*hidden/u);
+  assert.match(html, /data-exam-type="partial"[^>]*>Parciales</u);
+  assert.match(html, /data-exam-type="final"[^>]*>Finales</u);
+  assert.match(html, /activeMode === "all"[\s\S]*session\.examType !== "final"/u);
+  assert.match(html, /activeMode === "exams"[\s\S]*session\.examType === activeExamType/u);
+  assert.doesNotMatch(html, /activeMode === "exams"[^\n]*examType === "unknown"/u);
+  assert.match(html, /function setExamType\(examType\)[\s\S]*renderDesktop\(\);[\s\S]*renderMobile\(\);/u);
+  assert.match(html, /exam-type-control[\s\S]*mode-control/u, "exam selector must precede the main view selector");
 });
 
 test("print layout keeps the desktop timetable visible and vertically aligned", async () => {
@@ -127,6 +277,14 @@ test("print layout keeps the desktop timetable visible and vertically aligned", 
   assert.match(html, /const heightPercent\s*=/);
   assert.match(html, /event\.style\.top\s*=\s*`calc\(\$\{topPercent\}% \+ 2px\)`/);
   assert.match(html, /event\.style\.height\s*=\s*`calc\(\$\{heightPercent\}% - 4px\)`/);
+});
+
+test("schedule template expands its visible hours for official sessions outside 07:00-22:00", async () => {
+  const template = await readFile(templatePath, "utf8");
+
+  assert.match(template, /function scheduleBounds\(/u);
+  assert.match(template, /const \{ startMinutes: START_MINUTES, endMinutes: END_MINUTES \} = scheduleBounds\(sessions\)/u);
+  assert.doesNotMatch(template, /for \(let hour = 7; hour < 22;/u);
 });
 
 test("schedule renderer rejects courses whose declared exams are missing from sessions", async () => {
@@ -319,6 +477,8 @@ test("exam cards derive their display title from the associated course", async (
       start: "08:00",
       end: "11:00",
       type: "exam",
+      examType: "partial",
+      date: "2026-10-14",
       courseCodes: ["1IND52"],
       title: "Examen"
     }]
@@ -327,6 +487,167 @@ test("exam cards derive their display title from the associated course", async (
   const result = prepareScheduleDisplayData(input);
   assert.equal(result.sessions[0].title, "Examen", "the original Campus value must be preserved");
   assert.equal(result.sessions[0].displayTitle, "Diseño de la Cadena de Suministros y Operaciones");
+  assert.equal(result.sessions[0].displayExamDate, "14 oct");
+  assert.equal(result.sessions[0].displayExamType, "Parcial");
+});
+
+test("schedule display builds unambiguous partial and final summaries from dated sessions", async () => {
+  const { prepareScheduleDisplayData } = await import(pathToFileURL(displayPath));
+  const result = prepareScheduleDisplayData({
+    term: "2026-2",
+    credits: 4,
+    courses: [{ code: "1IND52", name: "Diseño", exams: "legacy ambiguous text" }],
+    sessions: [{
+      day: 3, start: "08:00", end: "11:00", type: "exam", examType: "partial",
+      date: "2026-10-14", courseCodes: ["1IND52"], room: "E309"
+    }, {
+      day: 5, start: "08:00", end: "11:00", type: "exam", examType: "final",
+      date: "2026-12-11", courseCodes: ["1IND52"], room: "E309"
+    }]
+  });
+
+  assert.equal(
+    result.courses[0].displayExams,
+    "Parcial: Mié. 14 oct · 08:00–11:00 · E309; Final: Vie. 11 dic · 08:00–11:00 · E309"
+  );
+});
+
+test("schedule renderer validates exam type, ISO date, weekday and true duplicates", async () => {
+  const { validateDeclaredExamSessions } = await import(pathToFileURL(rendererPath));
+  const course = {
+    code: "1IND52", name: "Diseño", exams: "Parcial y final", examStatus: "published"
+  };
+  const partial = {
+    day: 3, start: "08:00", end: "11:00", type: "exam", examType: "partial",
+    date: "2026-10-14", courseCodes: ["1IND52"], room: "E309"
+  };
+  const final = {
+    ...partial, day: 5, examType: "final", date: "2026-12-11"
+  };
+
+  assert.doesNotThrow(() => validateDeclaredExamSessions({ courses: [course], sessions: [partial, final] }));
+  assert.throws(
+    () => validateDeclaredExamSessions({ courses: [course], sessions: [{ ...partial, examType: undefined }] }),
+    (error) => error.code === "schedule_exam_metadata_required"
+  );
+  assert.throws(
+    () => validateDeclaredExamSessions({ courses: [course], sessions: [{ ...partial, date: "2026-10-15" }] }),
+    (error) => error.code === "schedule_exam_date_day_mismatch"
+  );
+  assert.throws(
+    () => validateDeclaredExamSessions({ courses: [course], sessions: [partial, { ...partial }] }),
+    (error) => error.code === "schedule_exam_duplicate"
+  );
+  assert.doesNotThrow(() => validateDeclaredExamSessions({
+    courses: [course],
+    sessions: [partial, { ...partial, examType: "final", date: "2026-12-09" }]
+  }));
+});
+
+test("schedule renderer preserves catalog exams when Campus publishes only weekday and time", async () => {
+  const { renderScheduleTemplate } = await import(pathToFileURL(rendererPath));
+  const outputDir = await mkdtemp(path.join(tmpdir(), "pucp-schedule-catalog-exam-"));
+  const outputPath = path.join(outputDir, "horario.html");
+  const data = {
+    term: "2026-2",
+    credits: 3,
+    courses: [{
+      code: "1ING15",
+      name: "Ética y Responsabilidad Social",
+      credits: 3,
+      scheduleId: "0901",
+      instructor: "Docente",
+      classes: "Lun 10:00–12:00",
+      practice: "—",
+      exams: "Lun 15:00–18:00",
+      examStatus: "schedule_only"
+    }],
+    sessions: [{
+      day: 1,
+      start: "10:00",
+      end: "12:00",
+      type: "class",
+      courseCodes: ["1ING15"],
+      scheduleId: "0901"
+    }, {
+      day: 1,
+      start: "15:00",
+      end: "18:00",
+      type: "exam",
+      examType: "unknown",
+      datePrecision: "weekday_time_only",
+      courseCodes: ["1ING15"],
+      scheduleId: "0901",
+      room: "A207"
+    }]
+  };
+
+  try {
+    await renderScheduleTemplate({ templatePath, outputPath, data });
+    const html = await readFile(outputPath, "utf8");
+    const embedded = html.match(/<script id="schedule-data" type="application\/json">([\s\S]*?)<\/script>/u)?.[1];
+    const rendered = JSON.parse(embedded);
+
+    assert.equal(rendered.sessions[1].date, undefined);
+    assert.equal(rendered.sessions[1].datePrecision, "weekday_time_only");
+    assert.equal(rendered.sessions[1].displayExamDate, "Fecha no publicada");
+    assert.match(rendered.courses[0].displayExams, /fecha no publicada/i);
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
+});
+
+test("schedule renderer combines multiple rooms for one exam into one card", async () => {
+  const { renderScheduleTemplate } = await import(pathToFileURL(rendererPath));
+  const outputDir = await mkdtemp(path.join(tmpdir(), "pucp-schedule-exam-rooms-"));
+  const outputPath = path.join(outputDir, "horario.html");
+  const course = {
+    code: "1IND52",
+    name: "Diseño de la Cadena de Suministros y Operaciones",
+    credits: 4,
+    scheduleId: "0732",
+    instructor: "Docente",
+    classes: "Lun 10:00–13:00",
+    practice: "—",
+    exams: "Parcial: Mié 14 oct · 08:00–11:00",
+    examStatus: "published"
+  };
+  const baseExam = {
+    day: 3,
+    start: "08:00",
+    end: "11:00",
+    type: "exam",
+    examType: "partial",
+    date: "2026-10-14",
+    courseCodes: ["1IND52"],
+    scheduleId: "0732",
+    title: course.name
+  };
+
+  try {
+    await renderScheduleTemplate({
+      templatePath,
+      outputPath,
+      data: {
+        term: "2026-2",
+        credits: 4,
+        courses: [course],
+        sessions: [
+          { ...baseExam, room: "A402" },
+          { ...baseExam, room: "A607" }
+        ]
+      }
+    });
+    const html = await readFile(outputPath, "utf8");
+    const embedded = html.match(/<script id="schedule-data" type="application\/json">([\s\S]*?)<\/script>/u)?.[1];
+    const rendered = JSON.parse(embedded);
+
+    assert.equal(rendered.sessions.length, 1);
+    assert.equal(rendered.sessions[0].room, "A402, A607");
+    assert.deepEqual(rendered.sessions[0].rooms, ["A402", "A607"]);
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
 });
 
 test("schedule display compacts explicitly separated multiple instructors", async () => {
@@ -411,6 +732,7 @@ test("PUCP Academic points agents to the bundled schedule renderer", async () =>
   assert.match(reference, /cada curso que declare exámenes.*type.*exam/is);
   assert.match(reference, /examStatus.*published.*not_published.*unknown/is);
   assert.match(reference, /no cambies.*exams.*-.*validaci/is);
+  assert.match(skill, /varias aulas.*una sola sesión.*no multipliques.*parciales\/finales/is);
 });
 
 test("public installations discover and copy the complete HTML schedule skill", async () => {
@@ -428,4 +750,5 @@ test("public installations discover and copy the complete HTML schedule skill", 
   assert.match(agents, /carpetas completas.*recursiv/is);
   assert.match(installation, /carpetas completas.*recursiv/is);
   assert.equal(await exists(layoutPath), true, "public skill must bundle its layout module");
+  assert.equal(await exists(sourcePath), true, "public skill must bundle its Campus schedule adapter");
 });

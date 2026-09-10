@@ -1,4 +1,5 @@
 import { cleanText, decodeHtml, searchableText } from "./text.js";
+import { normalizeCampusRoom } from "@pucp-academic-mcp/common";
 
 const MODULE_ORDER = [
   "agenda",
@@ -711,7 +712,8 @@ export function parseLegacyStudentScheduleHtml(html) {
         if (!sequence) continue;
         const rawType = sequence[6].toUpperCase();
         const scheduleId = cleanText(sequence[5]);
-        const room = studentScheduleRoom(fragment, scheduleId, rawType);
+        const normalizedRoom = normalizeCampusRoom(studentScheduleRoom(fragment, scheduleId, rawType));
+        const room = normalizedRoom.room;
         slots.push({
           courseCode: cleanText(sequence[4]).toUpperCase(),
           courseName: cleanText(sequence[9]),
@@ -724,6 +726,7 @@ export function parseLegacyStudentScheduleHtml(html) {
           start: padHour(time[1]),
           end: padHour(time[2]),
           room,
+          ...(normalizedRoom.group ? { group: normalizedRoom.group } : {}),
           modality: studentScheduleModality(room)
         });
       }

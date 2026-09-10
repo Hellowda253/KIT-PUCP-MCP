@@ -1,7 +1,9 @@
 import {
+  buildCanonicalStudentSchedule,
   McpToolError,
   TTL_SECONDS,
   createEnvelope,
+  enrichScheduleItemsWithAgenda,
   readJsonCache,
   resolveCourse
 } from "@pucp-academic-mcp/common";
@@ -93,6 +95,20 @@ function campusItems(campus, module) {
 function campusValue(campus, module) {
   const entry = campus?.modules?.[module];
   return entry?.state === "available" ? entry.value ?? null : null;
+}
+
+function currentScheduleOfferings(cache, courseCode, term) {
+  const code = String(courseCode ?? "").trim().toUpperCase();
+  const entries = [...(cache?.entries ?? [])]
+    .filter(({ query }) => query?.mode !== "historical")
+    .filter(({ query }) => !term || !query?.term || query.term === "active" || query.term === term)
+    .sort((left, right) => String(right.generatedAt ?? "").localeCompare(String(left.generatedAt ?? "")));
+  const latest = entries.find(({ items = [] }) => items.some((item) =>
+    String(item.courseCode ?? "").trim().toUpperCase() === code
+  ));
+  return (latest?.items ?? []).filter((item) =>
+    String(item.courseCode ?? "").trim().toUpperCase() === code
+  );
 }
 
 function buildUpcoming(paideia, campus, start, end) {
@@ -351,6 +367,21 @@ export function createOverviewService({
     const paideiaGrades = courseId
       ? sources.paideia?.grades?.[courseId]?.items ?? []
       : [];
+    const rawSchedule = campusItems(sources.campus, "student_schedule").filter(belongs);
+    const scheduleOfferings = campusCourse
+      ? enrichScheduleItemsWithAgenda(
+          currentScheduleOfferings(
+            sources.campusSchedules,
+            campusCourse.code,
+            campusCourse.term ?? scheduleModule?.term
+          ),
+          sources.campus
+        )
+      : [];
+    const canonicalSchedule = buildCanonicalStudentSchedule(
+      rawSchedule,
+      scheduleOfferings
+    );
     return wrap(sources, {
       course: {
         id: paideiaCourse?.id ?? campusCourse?.code,
@@ -363,10 +394,13 @@ export function createOverviewService({
       announcements,
       paideiaGrades,
       officialGrades: campusItems(sources.campus, "official_grades").filter(belongs),
-      schedule: campusItems(sources.campus, "student_schedule").filter(belongs),
+      schedule: canonicalSchedule.items,
       scheduleStatus: {
         state: scheduleModule?.state ?? "unavailable",
         source: "student_schedule_page",
+        representation: scheduleOfferings.length > 0
+          ? "canonical_enriched"
+          : "student_schedule_page",
         generatedAt: scheduleModule?.generatedAt ?? null,
         reason: scheduleModule?.reason ?? null
       },

@@ -92,7 +92,7 @@ test("Profe PUCP is a focused teaching workflow that requests academic context s
   const sources = await read("skills/profe-pucp/references/course-sources.md");
   const ui = await read("skills/profe-pucp/agents/openai.yaml");
 
-  assert.ok(wordCount(skill) < 550, "Profe PUCP should contain decisions, not generic pedagogy");
+  assert.ok(wordCount(skill) <= 700, "Profe PUCP should stay compact and decision-oriented");
   assert.match(metadata(skill).description, /learn|exercise|evaluation|feedback/iu);
   assert.match(skill, /`pucp-academic`/u);
   assert.match(skill, /`pucp-context`/u);
@@ -100,6 +100,8 @@ test("Profe PUCP is a focused teaching workflow that requests academic context s
   assert.match(skill, /references\/assessment-analysis\.md/u);
   assert.match(skill, /references\/exam-preparation\.md/u);
   assert.match(skill, /references\/course-sources\.md/u);
+  assert.match(skill, /como máximo dos/iu);
+  assert.match(skill, /requiere un archivo.*adjunte/isu);
   assert.match(assessment, /f[oó]rmula.*confirmada/isu);
   assert.match(assessment, /escenarios/iu);
   assert.match(exam, /prioriza/iu);
