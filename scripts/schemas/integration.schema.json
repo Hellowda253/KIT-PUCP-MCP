@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "version", "installRoot", "stateRoot", "clientIdPattern", "servers", "skills", "assets", "clients", "privateLayout"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "version": { "type": "string" },
+    "installRoot": { "type": "string", "minLength": 3 },
+    "stateRoot": { "type": "string", "minLength": 3 },
+    "clientIdPattern": { "type": "string" },
+    "servers": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "transport", "command", "args"],
+        "properties": {
+          "name": { "enum": ["paideia", "campus_virtual_pucp", "pucp_academic_overview"] },
+          "transport": { "const": "stdio" },
+          "command": { "type": "string" },
+          "args": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "string" } }
+        }
+      }
+    },
+    "skills": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "names", "copyMode"],
+      "properties": {
+        "source": { "type": "string" },
+        "names": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "string" } },
+        "copyMode": { "const": "recursive_with_assets" }
+      }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheduleTemplate"],
+      "properties": { "scheduleTemplate": { "type": "string" } }
+    },
+    "clients": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["codex", "antigravity", "claude-code", "claude-desktop", "cursor", "kimi-code", "generic"],
+      "properties": {
+        "codex": { "$ref": "#/$defs/client" },
+        "antigravity": { "$ref": "#/$defs/client" },
+        "claude-code": { "$ref": "#/$defs/client" },
+        "claude-desktop": { "$ref": "#/$defs/client" },
+        "cursor": { "$ref": "#/$defs/client" },
+        "kimi-code": { "$ref": "#/$defs/client" },
+        "generic": { "$ref": "#/$defs/client" }
+      }
+    },
+    "privateLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "clientData", "downloads", "backups"],
+      "properties": {
+        "profile": { "type": "string" },
+        "clientData": { "type": "string" },
+        "downloads": { "type": "string" },
+        "backups": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mcp", "skills", "configHint", "skillsHint"],
+      "properties": {
+        "mcp": { "enum": ["verified", "documented", "conditional"] },
+        "skills": { "enum": ["verified", "documented", "conditional"] },
+        "configHint": { "type": "string" },
+        "skillsHint": { "type": "string" }
+      }
+    }
+  }
+}

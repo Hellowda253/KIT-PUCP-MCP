@@ -5,12 +5,20 @@ import { fileURLToPath } from "node:url";
 
 import {
   formatDoctorHuman,
+  inspectLocalRuntime,
   runDoctor,
   smokeStdioServer
 } from "../scripts/lib/doctor.js";
 
 const repositoryRoot = path.resolve("C:/PUCP MCP");
 const sentinel = "super-secret-sentinel";
+
+test("doctor classifies a missing system browser as browser_required", async () => {
+  const result = await inspectLocalRuntime({ repositoryRoot, envText: "", env: {} });
+  const browser = result.checks.find(({ id }) => id === "browser");
+  assert.equal(browser.status, "warn");
+  assert.equal(browser.code, "browser_required");
+});
 
 function passingRuntime() {
   return {
@@ -33,7 +41,8 @@ test("doctor stays offline and reports credential presence without values", asyn
     smokeServer: async ({ id }) => ({
       id,
       initialize: true,
-      toolCount: 1
+      toolCount: 1,
+      durationMs: 12
     }),
     liveCheck: async () => {
       liveCalls += 1;
@@ -51,6 +60,12 @@ test("doctor stays offline and reports credential presence without values", asyn
     report.checks.filter(({ id }) => id.startsWith("mcp:")).length,
     3
   );
+  assert.deepEqual(report.timings.servers, {
+    campus_virtual_pucp: 12,
+    paideia: 12,
+    pucp_academic_overview: 12
+  });
+  assert.equal(Number.isInteger(report.timings.totalMs), true);
   assert.doesNotMatch(JSON.stringify(report), new RegExp(sentinel));
   assert.doesNotMatch(formatDoctorHuman(report), new RegExp(sentinel));
 });

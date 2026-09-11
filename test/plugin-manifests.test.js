@@ -34,6 +34,8 @@ test("client templates name all servers and remain public placeholders", async (
     "integrations/antigravity/mcp_config.example.json",
     "integrations/claude-code/mcp.example.json",
     "integrations/claude-desktop/claude_desktop_config.example.json",
+    "integrations/cursor/mcp.example.json",
+    "integrations/kimi-code/mcp.example.json",
     "integrations/generic/mcp.example.json"
   ];
   const templates = await Promise.all(paths.map(read));
@@ -42,7 +44,9 @@ test("client templates name all servers and remain public placeholders", async (
     assert.match(template, /paideia/);
     assert.match(template, /campus_virtual_pucp/);
     assert.match(template, /pucp_academic_overview/);
-    assert.match(template, /PUCP_MCP_ROOT/);
+    assert.match(template, /PUCP_MCP_LAUNCHER/);
+    assert.match(template, /--client/);
+    assert.doesNotMatch(template, /PUCP_MCP_ROOT|NODE_EXECUTABLE/);
     assert.doesNotMatch(
       template,
       /PAIDEIA_PASS|CAMPUS_PUCP_PASS|PASSWORD|student-secret-sentinel|C:\\Users\\student/iu

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "activeVersion", "previousVersion", "runtimeRelativePath", "launcherRelativePath", "stateRoot", "updatedAt"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "activeVersion": { "type": "string" },
+    "previousVersion": { "type": ["string", "null"] },
+    "runtimeRelativePath": { "type": "string", "pattern": "^runtime/node-v.+-win-x64/node\\.exe$" },
+    "launcherRelativePath": { "type": "string", "pattern": "^versions/.+/scripts/portable-launcher\\.mjs$" },
+    "stateRoot": { "type": "string" },
+    "updatedAt": { "type": "string" }
+  }
+}

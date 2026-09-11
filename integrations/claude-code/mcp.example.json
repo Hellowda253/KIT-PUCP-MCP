@@ -1,22 +1,16 @@
 {
   "mcpServers": {
     "campus_virtual_pucp": {
-      "command": "${NODE_EXECUTABLE}",
-      "args": [
-        "${PUCP_MCP_ROOT}/servers/campus-virtual-pucp/src/server.js"
-      ]
+      "command": "${PUCP_MCP_LAUNCHER}",
+      "args": ["campus_virtual_pucp", "--client", "claude-code"]
     },
     "paideia": {
-      "command": "${NODE_EXECUTABLE}",
-      "args": [
-        "${PUCP_MCP_ROOT}/servers/paideia/src/server.js"
-      ]
+      "command": "${PUCP_MCP_LAUNCHER}",
+      "args": ["paideia", "--client", "claude-code"]
     },
     "pucp_academic_overview": {
-      "command": "${NODE_EXECUTABLE}",
-      "args": [
-        "${PUCP_MCP_ROOT}/servers/overview/src/server.js"
-      ]
+      "command": "${PUCP_MCP_LAUNCHER}",
+      "args": ["pucp_academic_overview", "--client", "claude-code"]
     }
   }
 }

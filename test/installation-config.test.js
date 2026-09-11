@@ -6,11 +6,13 @@ import test from "node:test";
 
 import {
   buildInstallConfig,
+  buildPortableInstallConfig,
   renderInstallConfig,
   writeInstallConfig
 } from "../scripts/lib/installation-config.js";
 
 const repositoryRoot = path.resolve("C:/PUCP MCP");
+const launcherPath = path.resolve("C:/Student Tools/PUCP-MCP/launcher.cmd");
 
 test("buildInstallConfig emits three deterministic absolute secret-free stdio servers", () => {
   const config = buildInstallConfig({
@@ -45,6 +47,32 @@ test("buildInstallConfig rejects relative roots and node paths", () => {
   );
 });
 
+test("portable install config uses one stable launcher and a client-specific state id", () => {
+  const config = buildPortableInstallConfig({ launcherPath, clientId: "codex" });
+  for (const [name, server] of Object.entries(config.mcpServers)) {
+    assert.equal(server.command, launcherPath);
+    assert.deepEqual(server.args, [name, "--client", "codex"]);
+    assert.equal("env" in server, false);
+  }
+  assert.throws(
+    () => buildPortableInstallConfig({ launcherPath, clientId: "../shared" }),
+    /client-id/u
+  );
+});
+
+test("portable config renders for existing client formats without exposing profile values", () => {
+  const codex = renderInstallConfig({ client: "codex", launcherPath, clientId: "codex" });
+  assert.match(codex, /launcher\.cmd/u);
+  assert.match(codex, /--client/u);
+  const generic = JSON.parse(renderInstallConfig({
+    client: "generic",
+    launcherPath,
+    clientId: "other-client"
+  }));
+  assert.deepEqual(generic.mcpServers.paideia.args, ["paideia", "--client", "other-client"]);
+  assert.equal(/PASS|PASSWORD/iu.test(JSON.stringify(generic)), false);
+});
+
 test("renderInstallConfig supports Codex, Antigravity, and both Claude clients", () => {
   const codex = renderInstallConfig({
     client: "codex",
@@ -57,6 +85,8 @@ test("renderInstallConfig supports Codex, Antigravity, and both Claude clients",
 
   for (const client of [
     "antigravity",
+    "cursor",
+    "kimi-code",
     "claude-code",
     "claude-desktop",
     "generic"

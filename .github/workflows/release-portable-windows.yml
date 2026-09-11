@@ -1,0 +1,48 @@
+name: Portable Windows release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install development dependencies
+        run: npm ci
+      - name: Run complete test suite
+        run: npm test
+      - name: Verify tag matches package version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag must be v$version" }
+      - name: Build verified portable release
+        run: npm run build:portable -- --output-dir output/portable
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kit-pucp-mcp-portable-windows
+          path: |
+            output/portable/*.zip
+            output/portable/*.sha256
+            output/portable/release-manifest.json
+      - name: Publish tagged GitHub release assets
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem output/portable -File | Where-Object { $_.Extension -in '.zip', '.sha256', '.json' }
+          gh release create $env:GITHUB_REF_NAME @($assets.FullName) --verify-tag --generate-notes

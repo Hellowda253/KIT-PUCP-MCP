@@ -21,6 +21,9 @@
     "install-config": "node scripts/generate-install-config.js",
     "sync-skills": "node scripts/sync-skills.js",
     "doctor": "node scripts/doctor.js",
+    "build:portable": "node scripts/build-portable-release.mjs",
+    "verify:portable": "node --test test/portable-*.test.js",
+    "verify:integration": "node scripts/verify-client-integration.mjs",
     "start:paideia": "npm start --workspace @pucp-academic-mcp/paideia",
     "start:campus": "npm start --workspace @pucp-academic-mcp/campus-virtual-pucp",
     "start:overview": "npm start --workspace @pucp-academic-mcp/overview"

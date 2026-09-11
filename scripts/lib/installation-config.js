@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { PORTABLE_SERVERS, validateClientId } from "./portable-installation.js";
+
 const SERVER_PATHS = Object.freeze({
   campus_virtual_pucp: [
     "servers",
@@ -15,6 +17,8 @@ const SERVER_PATHS = Object.freeze({
 
 const JSON_CLIENTS = new Set([
   "antigravity",
+  "cursor",
+  "kimi-code",
   "claude-code",
   "claude-desktop",
   "generic"
@@ -61,8 +65,26 @@ export function buildInstallConfig({
   };
 }
 
-export function renderInstallConfig({ client, repositoryRoot, nodePath } = {}) {
-  const config = buildInstallConfig({ repositoryRoot, nodePath });
+export function buildPortableInstallConfig({ launcherPath, clientId } = {}) {
+  const command = requireAbsolute("launcherPath", launcherPath);
+  const safeClientId = validateClientId(clientId);
+  return {
+    mcpServers: Object.fromEntries(
+      Object.keys(PORTABLE_SERVERS).map((name) => [
+        name,
+        {
+          command,
+          args: [name, "--client", safeClientId]
+        }
+      ])
+    )
+  };
+}
+
+export function renderInstallConfig({ client, repositoryRoot, nodePath, launcherPath, clientId } = {}) {
+  const config = launcherPath
+    ? buildPortableInstallConfig({ launcherPath, clientId })
+    : buildInstallConfig({ repositoryRoot, nodePath });
   if (client === "codex") {
     return renderCodex(config);
   }

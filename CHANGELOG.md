@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Añade una distribución portátil para Windows x64 con Node.js incluido,
+  instalación por versiones, launcher estable, estado separado por cliente,
+  actualización atómica, reparación y rollback sin depender de Git o Node global.
+- Incorpora manifiestos verificables, SHA-256, auditoría de secretos y enlaces,
+  Doctor con tiempos por servidor, detección de Chrome o Edge y verificación
+  independiente de MCP, skills y plantilla.
+- Actualiza el contrato de instalación asistida para Codex, Antigravity, Claude
+  y clientes MCP compatibles sin sobrescribir configuraciones ajenas.
+
 ## 0.4.0 - 2026-09-10
 
 - Deduplica calendarios equivalentes, normaliza los nombres de programa y da precedencia al registro curado frente a respaldos locales.

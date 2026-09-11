@@ -2,15 +2,15 @@
   "mcpServers": {
     "campus_virtual_pucp": {
       "command": "${PUCP_MCP_LAUNCHER}",
-      "args": ["campus_virtual_pucp", "--client", "${CLIENT_ID}"]
+      "args": ["campus_virtual_pucp", "--client", "kimi-code"]
     },
     "paideia": {
       "command": "${PUCP_MCP_LAUNCHER}",
-      "args": ["paideia", "--client", "${CLIENT_ID}"]
+      "args": ["paideia", "--client", "kimi-code"]
     },
     "pucp_academic_overview": {
       "command": "${PUCP_MCP_LAUNCHER}",
-      "args": ["pucp_academic_overview", "--client", "${CLIENT_ID}"]
+      "args": ["pucp_academic_overview", "--client", "kimi-code"]
     }
   }
 }

@@ -23,8 +23,8 @@ const SERVER_PATHS = Object.freeze({
   pucp_academic_overview: ["servers", "overview", "src", "server.js"]
 });
 
-function check(id, status, detail) {
-  return { id, status, detail };
+function check(id, status, detail, code = null) {
+  return code ? { id, status, detail, code } : { id, status, detail };
 }
 
 async function exists(filePath, mode = constants.F_OK) {
@@ -45,6 +45,12 @@ function browserCandidates(env, values) {
       path.join(env["PROGRAMFILES(X86)"], "Google", "Chrome", "Application", "chrome.exe"),
     env.LOCALAPPDATA &&
       path.join(env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe"),
+    env.PROGRAMFILES &&
+      path.join(env.PROGRAMFILES, "Microsoft", "Edge", "Application", "msedge.exe"),
+    env["PROGRAMFILES(X86)"] &&
+      path.join(env["PROGRAMFILES(X86)"], "Microsoft", "Edge", "Application", "msedge.exe"),
+    env.LOCALAPPDATA &&
+      path.join(env.LOCALAPPDATA, "Microsoft", "Edge", "Application", "msedge.exe"),
     process.platform === "darwin" &&
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     process.platform !== "win32" && "/usr/bin/google-chrome",
@@ -94,7 +100,8 @@ export async function inspectLocalRuntime({
       check(
         "browser",
         browserOk ? "pass" : "warn",
-        browserOk ? "Compatible Chrome executable found" : "Chrome was not detected"
+        browserOk ? "Compatible Chrome or Edge executable found" : "Chrome or Edge was not detected",
+        browserOk ? null : "browser_required"
       ),
       check(
         "env-ignore",
@@ -115,6 +122,7 @@ export async function smokeStdioServer({ id, entrypoint, repositoryRoot }) {
     throw new Error(`Missing server entrypoint for ${id}`);
   }
   return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     const child = spawn(process.execPath, [entrypoint], {
       cwd: repositoryRoot,
       env: process.env,
@@ -160,7 +168,8 @@ export async function smokeStdioServer({ id, entrypoint, repositoryRoot }) {
         resolve({
           id,
           initialize: Boolean(initialized?.result?.protocolVersion),
-          toolCount
+          toolCount,
+          durationMs: Date.now() - startedAt
         });
       } catch (error) {
         reject(new Error(`Invalid MCP response from ${id}`, { cause: error }));
@@ -198,6 +207,7 @@ export async function runDoctor({
   smokeServer = smokeStdioServer,
   liveCheck
 } = {}) {
+  const doctorStartedAt = Date.now();
   if (!path.isAbsolute(repositoryRoot ?? "")) {
     throw new TypeError("repositoryRoot must be absolute");
   }
@@ -215,6 +225,7 @@ export async function runDoctor({
     envText: resolvedEnvText
   });
   const checks = [...runtime.checks];
+  const serverTimings = {};
   checks.push(
     check(
       "credentials",
@@ -226,6 +237,7 @@ export async function runDoctor({
   );
 
   for (const [id, parts] of Object.entries(SERVER_PATHS)) {
+    const serverStartedAt = Date.now();
     try {
       const result = await smokeServer({
         id,
@@ -233,6 +245,9 @@ export async function runDoctor({
         repositoryRoot
       });
       const ok = result.initialize === true && result.toolCount > 0;
+      serverTimings[id] = Number.isInteger(result.durationMs)
+        ? result.durationMs
+        : Date.now() - serverStartedAt;
       checks.push(
         check(
           `mcp:${id}`,
@@ -241,6 +256,7 @@ export async function runDoctor({
         )
       );
     } catch {
+      serverTimings[id] = Date.now() - serverStartedAt;
       checks.push(check(`mcp:${id}`, "fail", "MCP server did not complete handshake"));
     }
   }
@@ -261,7 +277,11 @@ export async function runDoctor({
     generatedAt: new Date().toISOString(),
     live,
     checks,
-    credentials
+    credentials,
+    timings: {
+      totalMs: Date.now() - doctorStartedAt,
+      servers: serverTimings
+    }
   };
 }
 

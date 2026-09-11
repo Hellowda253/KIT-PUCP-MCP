@@ -1,60 +1,85 @@
 # Instalación de PUCP-MCP por agentes
 
-Estas instrucciones se aplican cuando un usuario pide instalar o actualizar este
-repositorio desde un enlace. El alcance inicial es Codex, Antigravity, Claude Code
-y Claude Desktop en Windows; para otro cliente, usa su formato MCP `stdio` vigente.
+Estas instrucciones se aplican cuando el usuario entrega el enlace de GitHub y
+pide instalar o actualizar el kit. La distribución normal es una **release
+portátil para Windows 10/11 x64**: no requiere Git, Node.js global, npm,
+permisos de administrador ni cambios en `PATH`.
+
+El protocolo cubre Codex, Antigravity y Claude, además de otros clientes MCP
+cuando declaren una interfaz de configuración compatible.
 
 ## Secuencia obligatoria
 
-1. Identifica el cliente, el sistema y si la instalación será de usuario o proyecto.
-2. Clona la etiqueta estable más reciente en una ubicación persistente. Si el
-   repositorio aún no tiene etiquetas, usa la rama predeterminada e informa esa
-   limitación. No ejecutes el MCP desde una carpeta temporal.
-3. Comprueba Node.js 20 o posterior y ejecuta `npm ci` en la raíz.
-4. Si falta `.env.local`, créalo a partir de `.env.example`.
-5. Configura credenciales según la sección siguiente.
-6. Ofrece una sola vez configurar una biblioteca académica. El usuario puede elegir
-   una carpeta existente o autorizar la creación de una nueva; si acepta, guarda su
-   ruta absoluta en `PUCP_DOWNLOADS_DIR`. No crees carpetas sin permiso ni insistas
-   si prefiere conservar el destino predeterminado.
-7. Ejecuta `npm run install-config -- --client CLIENTE --root RUTA_ABSOLUTA`.
-8. Lee la configuración vigente del cliente y crea una copia de seguridad antes de
-   cambiarla. Conserva todos los servidores ajenos y combina únicamente `paideia`,
-   `campus_virtual_pucp` y `pucp_academic_overview`.
-9. Instala las carpetas completas de `skills/` de forma recursiva, incluidos
-   `assets/`, `references/`, `scripts/` y `agents/`. Para Codex o Antigravity usa
-   primero `npm run sync-skills -- --target CLIENTE --dry-run` y, tras revisar el
-   resultado, repite con `--force`. Para otro cliente usa `--destination` con su
-   ruta de skills. El comando no elimina archivos adicionales.
-10. Ejecuta `npm run doctor -- --json`; después verifica `initialize` y `tools/list`
-   desde el cliente.
-11. Informa archivos modificados, pruebas realizadas y reversión disponible sin
+1. Identifica el cliente desde el que trabajas y pregunta qué otros clientes
+   desea configurar. No instales automáticamente en todos los detectados.
+2. Abre la release estable elegida, descarga
+   `KIT-PUCP-MCP-vX.Y.Z-windows-x64.zip`, su `.sha256` y
+   `release-manifest.json` usando las URLs versionadas de los assets. No uses la
+   API de GitHub como dependencia de la instalación.
+3. Verifica SHA-256 y que la versión del ZIP coincida con el manifiesto.
+4. Extrae el ZIP en una carpeta temporal y ejecuta, con rutas absolutas:
+
+   ```cmd
+   install.cmd install --json
+   install.cmd doctor --json
+   ```
+
+5. Lee `integration-manifest.json`. Contiene el launcher, los tres servidores,
+   las rutas fuente de skills y assets, y los directorios privados por cliente.
+6. Lee y valida la configuración vigente de cada cliente seleccionado. Crea una
+   copia de seguridad fechada y combina solamente `paideia`,
+   `campus_virtual_pucp` y `pucp_academic_overview`; preserva servidores ajenos.
+7. Usa rutas absolutas al launcher y asigna un `--client` diferente a cada
+   cliente. No apuntes las configuraciones directamente a una carpeta de
+   versión.
+8. Copia las carpetas completas de las tres skills de forma recursiva, incluidos
+   `assets/`, `references/`, `scripts/` y `agents/`. En Codex usa
+   `$HOME/.agents/skills`; en Antigravity,
+   `$HOME/.gemini/antigravity/skills`. Para otro cliente confirma primero su
+   soporte y ruta de skills.
+9. Verifica por separado la sintaxis de configuración, `initialize`,
+   `tools/list`, descubrimiento de skills y presencia de la plantilla HTML. Si
+   el cliente lo exige, reinícialo y repite la comprobación.
+10. Informa la versión instalada, clientes configurados, backups y pruebas sin
     mostrar secretos.
 
 ## Credenciales proporcionadas en el chat
 
-El usuario puede entregar voluntariamente sus credenciales PUCP en el chat y pedir
-que el agente las use o guarde. Esa autorización se limita a esta instalación.
+El usuario puede entregar voluntariamente sus credenciales PUCP y pedir que el
+agente las guarde. Esa autorización se limita a esta instalación.
 
-- Por defecto guárdalas en `.env.local` como `PAIDEIA_USER`, `PAIDEIA_PASS`,
-  `CAMPUS_PUCP_USER` y `CAMPUS_PUCP_PASS`.
-- Si el usuario pide guardarlas en el cliente, usa su bloque `env` únicamente por
-  petición expresa. Advierte que algunos clientes conservan ese archivo como texto
-  plano.
-- Nunca coloques secretos en `args`, URLs, nombres de archivo, comandos visibles,
-  Git, plantillas públicas o archivos de diagnóstico.
-- No vuelvas a repetir una contraseña en el chat, la salida del terminal, un diff o
-  el resumen final. Confirma solo los nombres de variables configurados.
-- Si las credenciales no fueron proporcionadas, termina la instalación igualmente;
-  `authentication_required` es el comportamiento esperado al consultar PUCP.
+- Guárdalas por defecto en el perfil compartido
+  `%LOCALAPPDATA%\PUCP-MCP\profiles\default\.env.local` como `PAIDEIA_USER`,
+  `PAIDEIA_PASS`, `CAMPUS_PUCP_USER` y `CAMPUS_PUCP_PASS`.
+- Si el usuario pide guardarlas en el cliente, usa su bloque `env` solo por
+  petición expresa y advierte que puede quedar como texto plano.
+- Nunca pongas secretos en argumentos, URLs, nombres de archivo, Git,
+  diagnósticos o plantillas públicas.
+- No vuelvas a repetir la contraseña en el chat, terminal, diff o resumen.
+- La instalación puede terminar sin credenciales; `authentication_required` es
+  entonces el resultado esperado de una consulta en vivo.
 
-## Escritura, actualización y reversión
+## Actualización, reparación y reversión
 
-Usa rutas absolutas para el ejecutable de Node y cada servidor. No edites una
-configuración cuyo formato no puedas validar. La copia de seguridad debe permanecer
-local y fuera de Git. Para actualizar, cambia a una etiqueta indicada, ejecuta
-`npm ci`, `npm test` y `npm run doctor` antes de conservar el cambio.
+Una actualización no modifica el núcleo activo en el sitio. Descarga y verifica
+el ZIP de la nueva versión, ejecuta `install.cmd update --json` y deja que el
+instalador copie a staging, ejecute Doctor y cambie `current.json` de forma
+atómica. El launcher estable seguirá funcionando y la versión anterior quedará
+disponible para `install.cmd rollback --json`.
 
-Al desinstalar, retira solamente las tres entradas y las skills de PUCP-MCP. No
-borres `.env.local`, cachés, descargas ni documentos personales sin una solicitud
-separada y explícita.
+Después de actualizar, vuelve a sincronizar las skills de los clientes
+seleccionados con backup previo. Si una etapa falla, usa `repair` para repetir
+solo esa etapa; no reinstales ni borres el estado privado de forma automática.
+
+La desinstalación retira el núcleo, pero conserva credenciales, cachés y
+descargas. El borrado de datos privados requiere otra solicitud explícita.
+
+## Límites
+
+- No publiques releases ni hagas `push` salvo solicitud expresa.
+- No alteres políticas del sistema ni intentes eludir antivirus o controles de
+  una organización.
+- Chrome o Edge sigue siendo necesario para las consultas que usan navegador;
+  su ausencia debe producir `browser_required`, no una instalación corrupta.
+- Git y `npm ci` son herramientas de desarrollo desde código fuente, no pasos de
+  la instalación normal para estudiantes.

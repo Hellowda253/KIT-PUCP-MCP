@@ -1,6 +1,10 @@
 # Instalación portátil, confiable y asistida por agentes de KIT PUCP MCP
 
-> **Estado:** plan aprobado, todavía no implementado. Su ejecución no autoriza publicar una release ni modificar las instalaciones actuales de Codex, Antigravity u otros clientes.
+> **Estado:** implementado en código y pruebas, pendiente de publicación. La guía
+> operativa vigente es [`docs/installation.md`](../../installation.md); los nombres
+> y ejemplos de este documento conservan el diseño previo como registro histórico.
+> La implementación no autoriza publicar una release ni modificar instalaciones
+> actuales de Codex, Antigravity u otros clientes.
 
 **Objetivo:** ofrecer una instalación local reproducible de KIT PUCP MCP en Windows 10/11, sin exigir Git, Node.js global, permisos de administrador ni conocimiento manual de MCP. Debe admitir varios agentes en una misma computadora, recuperarse de fallos y completar el núcleo más hasta dos integraciones en menos de seis minutos bajo condiciones controladas.
 

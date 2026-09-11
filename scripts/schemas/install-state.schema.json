@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "activeVersion", "previousVersion", "releases", "managedClients", "lastAction"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "activeVersion": { "type": "string" },
+    "previousVersion": { "type": ["string", "null"] },
+    "releases": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["runtimeDirectory", "installedAt"],
+        "properties": {
+          "runtimeDirectory": { "type": "string", "pattern": "^node-v.+-win-x64$" },
+          "installedAt": { "type": "string" }
+        }
+      }
+    },
+    "managedClients": { "type": "object" },
+    "lastAction": { "enum": ["install", "update", "repair", "rollback"] }
+  }
+}

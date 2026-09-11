@@ -57,32 +57,47 @@ acciones académicas o administrativas.
 
 ## Instalación local
 
-Requiere Node.js 20 o posterior.
+La instalación normal usa una **release portátil para Windows 10/11 x64**. El
+paquete incluye Node.js y sus dependencias, por lo que el estudiante no necesita
+Git, Node global, npm, permisos de administrador ni cambios en `PATH`.
 
 ### Instalación dirigida por un agente
 
 Entrega el enlace de este repositorio a Codex, Antigravity, Claude Code o a un
 agente con acceso al terminal y usa este mensaje:
 
-> Instala PUCP-MCP desde este repositorio. Sigue `AGENTS.md`, configura este cliente,
-> instala las skills y verifica los tres servidores. No muestres mis credenciales.
+> Instala PUCP-MCP desde este repositorio usando la última release estable.
+> Sigue `AGENTS.md`, configura este cliente y los que yo elija, instala las skills
+> y assets, verifica los tres servidores y no muestres mis credenciales.
 
-El agente puede generar una propuesta específica para Codex, Antigravity, Claude
-Code o Claude Desktop y verificarla con `npm run doctor`. Consulta la
+El agente verifica el ZIP y su manifiesto, ejecuta `install.cmd doctor`, combina
+solo los clientes seleccionados y comprueba MCP, skills y assets por separado.
+Codex y Antigravity están verificados; Claude Code está documentado y
+Claude Desktop se integra de forma condicional según su versión. Consulta la
 [guía de instalación](docs/installation.md) para credenciales, actualización,
 reversión y desinstalación.
 
 ### Instalación manual
 
-```powershell
-git clone <URL-DEL-REPOSITORIO> PUCP-MCP
-cd PUCP-MCP
-npm ci
-Copy-Item .env.example .env.local
+Descarga desde Releases los tres archivos de la misma versión y verifica su
+SHA-256 antes de extraerlos:
+
+```text
+KIT-PUCP-MCP-vX.Y.Z-windows-x64.zip
+KIT-PUCP-MCP-vX.Y.Z-windows-x64.zip.sha256
+release-manifest.json
 ```
 
-Completa en `.env.local` solo tus credenciales y, de forma opcional, tus rutas
-de descarga. No publiques ni compartas ese archivo.
+Después ejecuta desde la carpeta extraída:
+
+```cmd
+install.cmd install --json
+install.cmd doctor --json
+```
+
+Completa el perfil privado en
+`%LOCALAPPDATA%\PUCP-MCP\profiles\default\.env.local`. No publiques ni compartas
+ese archivo.
 
 ```dotenv
 PAIDEIA_USER=
@@ -91,10 +106,10 @@ CAMPUS_PUCP_USER=
 CAMPUS_PUCP_PASS=
 ```
 
-Los valores por defecto guardan información local ignorada por Git en
-`data/` y descargas en `downloads/Paideia`, `downloads/Campus` y
-`downloads/Privado`. Puedes
-cambiar esas rutas mediante las variables de `.env.example`.
+Los datos se guardan fuera del núcleo versionado. Cada cliente tiene caché y
+estado independientes, mientras las credenciales y descargas pueden ser comunes.
+Una actualización instala el ZIP nuevo junto al anterior, ejecuta Doctor y
+cambia el launcher atómicamente; `rollback` restaura la versión previa.
 
 ### Primer uso
 
@@ -164,7 +179,8 @@ verifican en vivo.
 
 ## Desarrollo y contribuciones
 
-Ejecuta `npm test` antes de abrir un cambio. Las pruebas usan fixtures
+El desarrollo desde código fuente sí requiere Node.js 20 o posterior y puede
+usar Git. Ejecuta `npm ci` y `npm test` antes de abrir un cambio. Las pruebas usan fixtures
 sanitizados y no requieren credenciales ni conexión a la PUCP. Conserva el
 enfoque de mínimo privilegio: herramientas explícitas, validación exacta de
 URL/campos y datos normalizados. Una escritura nueva requiere un flujo separado

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "version", "platform", "repository", "assetName", "assetUrl", "checksumUrl", "sha256", "size", "runtime"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" },
+    "platform": { "const": "windows-x64" },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "assetName": { "type": "string", "pattern": "^KIT-PUCP-MCP-v.+-windows-x64\\.zip$" },
+    "assetUrl": { "type": "string", "pattern": "^https://github\\.com/.+/releases/download/v.+/.+\\.zip$" },
+    "checksumUrl": { "type": "string", "pattern": "^https://github\\.com/.+\\.zip\\.sha256$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "size": { "type": "integer", "minimum": 1, "maximum": 68157440 },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "directory"],
+      "properties": {
+        "name": { "const": "node" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "directory": { "type": "string", "pattern": "^node-v.+-win-x64$" }
+      }
+    }
+  }
+}
