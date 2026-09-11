@@ -9,19 +9,21 @@ async function read(relativePath) {
 }
 
 test("plugin manifests package PUCP skills without embedding secrets", async () => {
-  const [codexText, claudeText] = await Promise.all([
+  const [codexText, claudeText, packageText] = await Promise.all([
     read(".codex-plugin/plugin.json"),
-    read(".claude-plugin/plugin.json")
+    read(".claude-plugin/plugin.json"),
+    read("package.json")
   ]);
   assert.ok(codexText, "Codex plugin manifest must exist");
   assert.ok(claudeText, "Claude plugin manifest must exist");
   const codex = JSON.parse(codexText);
   const claude = JSON.parse(claudeText);
+  const packageVersion = JSON.parse(packageText).version;
 
   assert.equal(codex.name, "pucp-mcp");
   assert.equal(claude.name, "pucp-mcp");
-  assert.equal(codex.version, "0.4.0");
-  assert.equal(claude.version, "0.4.0");
+  assert.equal(codex.version, packageVersion);
+  assert.equal(claude.version, packageVersion);
   assert.equal(codex.skills, "./skills/");
   assert.doesNotMatch(
     JSON.stringify({ codex, claude }),

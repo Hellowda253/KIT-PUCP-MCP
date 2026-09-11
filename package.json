@@ -1,6 +1,6 @@
 {
   "name": "pucp-academic-mcp",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Kit MCP comunitario para conectar asistentes de IA con Paideia y Campus Virtual PUCP.",
   "private": true,
   "license": "MIT",

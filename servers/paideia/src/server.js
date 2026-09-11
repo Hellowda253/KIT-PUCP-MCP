@@ -18,7 +18,7 @@ export function createPaideiaServer(options = {}) {
   const { calendarStore: _calendarStore, service: _service, adapter: _adapter, ...transportOptions } = options;
   const transport = createStdioMcpServer({
     name: "pucp-paideia",
-    version: "0.4.0",
+    version: "0.4.1",
     tools: withAcademicContext(createPaideiaTools(service), calendarStore),
     ...transportOptions
   });

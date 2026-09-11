@@ -15,7 +15,7 @@ export function createOverviewServer(options = {}) {
   } = options;
   return createStdioMcpServer({
     name: "pucp-academic-overview",
-    version: "0.4.0",
+    version: "0.4.1",
     tools: [...withAcademicContext(createOverviewTools(service), calendarStore), ...createAcademicCalendarTools(calendarStore)],
     ...transportOptions
   });

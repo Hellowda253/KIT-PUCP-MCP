@@ -19,7 +19,7 @@ export function createCampusVirtualServer(options = {}) {
   const { calendarStore: _calendarStore, service: _service, adapter: _adapter, ...transportOptions } = options;
   const transport = createStdioMcpServer({
     name: "pucp-campus-virtual",
-    version: "0.4.0",
+    version: "0.4.1",
     tools: withAcademicContext(createCampusTools(service), calendarStore),
     ...transportOptions
   });

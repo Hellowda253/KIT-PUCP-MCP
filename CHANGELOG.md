@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-09-11
+
 - Añade una distribución portátil para Windows x64 con Node.js incluido,
   instalación por versiones, launcher estable, estado separado por cliente,
   actualización atómica, reparación y rollback sin depender de Git o Node global.

@@ -13,6 +13,7 @@ import {
 import { verifyPortableArtifact } from "../scripts/lib/portable-installation.js";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
+const packageVersion = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8")).version;
 
 test("portable production install invokes npm through Node on Windows", () => {
   const invocation = productionNpmInvocation({
@@ -73,13 +74,13 @@ test("portable artifact contains materialized dependencies, skills, runtime, and
     dependencySource: path.join(repositoryRoot, "node_modules")
   });
 
-  assert.equal(result.version, "0.4.0");
+  assert.equal(result.version, packageVersion);
   assert.equal((await lstat(path.join(artifactRoot, "app", "node_modules", "@pucp-academic-mcp", "common"))).isSymbolicLink(), false);
   assert.equal((await lstat(path.join(artifactRoot, "app", "skills", "pucp-academic", "assets", "horario-pucp.html"))).isFile(), true);
   assert.equal((await lstat(path.join(artifactRoot, "install.cmd"))).isFile(), true);
   assert.equal((await lstat(path.join(artifactRoot, "runtime", "node-v24.16.0-win-x64", "node.exe"))).isFile(), true);
   assert.equal(await lstat(path.join(artifactRoot, "runtime", "node-v24.16.0-win-x64", "node_modules")).then(() => true).catch(() => false), false);
-  assert.equal(await readFile(path.join(artifactRoot, "app", "package.json"), "utf8").then((text) => JSON.parse(text).version), "0.4.0");
+  assert.equal(await readFile(path.join(artifactRoot, "app", "package.json"), "utf8").then((text) => JSON.parse(text).version), packageVersion);
   assert.equal(await lstat(path.join(artifactRoot, "app", "packages", "common", "test")).then(() => true).catch(() => false), false);
   const verified = await verifyPortableArtifact(artifactRoot, { platform: "win32", arch: "x64" });
   assert.equal(verified.files.length > 20, true);
